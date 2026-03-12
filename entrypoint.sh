@@ -1,0 +1,50 @@
+#!/bin/bash
+set -e
+
+# In rootless Docker, host UID 1000 maps to container UID 0 (root).
+# Claude Code refuses to run as root, so we drop to user "dev".
+# We use ACLs to ensure both root (=host user) and dev can read/write
+# all project files.
+
+if [ -d /workspace/project ]; then
+    # Give dev access to existing host-owned files
+    setfacl -R -m u:dev:rwX /workspace/project 2>/dev/null || true
+    # Default ACL: new files/dirs automatically grant access to both
+    setfacl -R -d -m u:dev:rwX /workspace/project 2>/dev/null || true
+    setfacl -R -d -m u:0:rwX /workspace/project 2>/dev/null || true
+fi
+
+# Ensure dev owns the .claude config directory (Docker volume starts as root)
+chown -R dev:dev /home/dev/.claude 2>/dev/null || true
+
+# Copy host auth files so dev user can use the existing subscription
+mkdir -p /home/dev/.claude
+if [ -f /tmp/host-credentials.json ]; then
+    cp /tmp/host-credentials.json /home/dev/.claude/.credentials.json
+    chown dev:dev /home/dev/.claude/.credentials.json
+    chmod 600 /home/dev/.claude/.credentials.json
+fi
+if [ -f /tmp/host-claude.json ]; then
+    cp /tmp/host-claude.json /home/dev/.claude.json
+    chown dev:dev /home/dev/.claude.json
+    chmod 600 /home/dev/.claude.json
+fi
+
+# Allow dev to access PulseAudio socket
+PULSE_DIR=$(find /run/user -maxdepth 2 -name pulse -type d 2>/dev/null | head -1)
+if [ -n "$PULSE_DIR" ]; then
+    setfacl -R -m u:dev:rwX "$PULSE_DIR" 2>/dev/null || true
+fi
+
+# Route ALSA through PulseAudio so Claude Code's native audio module works
+# (it uses ALSA directly, but no sound cards are passed to the container)
+cat > /etc/asound.conf << 'ASOUNDEOF'
+pcm.!default {
+    type pulse
+}
+ctl.!default {
+    type pulse
+}
+ASOUNDEOF
+
+exec gosu dev "$@"
