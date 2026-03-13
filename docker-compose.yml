@@ -16,6 +16,7 @@ services:
       - pip-cache:/root/.cache/pip
       - /run/user/${HOST_UID:-1000}/pulse:/run/user/${HOST_UID:-1000}/pulse
       - ${HOME}/.config/pulse/cookie:/tmp/host-pulse-cookie:ro
+    working_dir: /workspace/project
     stdin_open: true
     tty: true
 
