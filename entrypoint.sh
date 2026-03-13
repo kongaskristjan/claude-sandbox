@@ -47,4 +47,23 @@ ctl.!default {
 }
 ASOUNDEOF
 
+# Mark the mounted project directory as safe for git (owned by root, run as dev)
+gosu dev git config --global --add safe.directory /workspace/project
+
+# Copy host git identity (name, email, default branch) but not credentials
+if [ -f /tmp/host-gitconfig ]; then
+    git_name=$(git config -f /tmp/host-gitconfig user.name 2>/dev/null || true)
+    git_email=$(git config -f /tmp/host-gitconfig user.email 2>/dev/null || true)
+    default_branch=$(git config -f /tmp/host-gitconfig init.defaultBranch 2>/dev/null || true)
+    if [ -n "$git_name" ]; then
+        gosu dev git config --global user.name "$git_name"
+    fi
+    if [ -n "$git_email" ]; then
+        gosu dev git config --global user.email "$git_email"
+    fi
+    if [ -n "$default_branch" ]; then
+        gosu dev git config --global init.defaultBranch "$default_branch"
+    fi
+fi
+
 exec gosu dev "$@"

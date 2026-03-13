@@ -15,6 +15,7 @@ services:
       - claude-config:/home/dev/.claude
       - pip-cache:/root/.cache/pip
       - /run/user/${HOST_UID:-1000}/pulse:/run/user/${HOST_UID:-1000}/pulse
+      - ${HOME}/.gitconfig:/tmp/host-gitconfig:ro
       - ${HOME}/.config/pulse/cookie:/tmp/host-pulse-cookie:ro
     working_dir: /workspace/project
     stdin_open: true
