@@ -2,9 +2,34 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
-export PROJECT_DIR="${1:-$(pwd)}"
+BASE_COMPOSE="$SCRIPT_DIR/docker-compose.yml"
 export HOST_UID="$(id -u)"
+
+usage() {
+    echo "Usage: claude-sandbox [--host-network] [project-dir]"
+    echo ""
+    echo "Options:"
+    echo "  --host-network  Use host networking (always enabled for rootless Docker,"
+    echo "                  opt-in for rootful Docker)"
+    echo ""
+    echo "Environment variables:"
+    echo "  CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection"
+    echo "  ANTHROPIC_API_KEY=sk-ant-...          Use API key instead of subscription"
+    exit 0
+}
+
+HOST_NETWORK=false
+PROJECT_DIR=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --host-network) HOST_NETWORK=true ;;
+        --help|-h) usage ;;
+        *) PROJECT_DIR="$arg" ;;
+    esac
+done
+
+export PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 
 if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ ! -f "$HOME/.claude/.credentials.json" ]; then
     echo "Error: No authentication found."
@@ -12,5 +37,43 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ ! -f "$HOME/.claude/.credentials.json" ]
     exit 1
 fi
 
-docker compose -f "$COMPOSE_FILE" build --quiet
-docker compose -f "$COMPOSE_FILE" run --rm claude-dev
+# Detect rootless vs rootful Docker
+detect_docker_mode() {
+    if [ -n "${CLAUDE_SANDBOX_MODE:-}" ]; then
+        case "$CLAUDE_SANDBOX_MODE" in
+            rootless|rootful) echo "$CLAUDE_SANDBOX_MODE"; return ;;
+            *) echo "Error: CLAUDE_SANDBOX_MODE must be 'rootless' or 'rootful'" >&2; exit 1 ;;
+        esac
+    fi
+
+    if [ -S "/run/user/$HOST_UID/docker.sock" ]; then
+        echo "rootless"
+        return
+    fi
+
+    local docker_root
+    docker_root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)"
+    if [[ "$docker_root" == "$HOME"* ]]; then
+        echo "rootless"
+        return
+    fi
+
+    echo "rootful"
+}
+
+MODE="$(detect_docker_mode)"
+OVERRIDE_COMPOSE="$SCRIPT_DIR/docker-compose.${MODE}.yml"
+
+# Build compose file list
+COMPOSE_FILES=(-f "$BASE_COMPOSE" -f "$OVERRIDE_COMPOSE")
+
+# Add host networking override if requested (meaningful for rootful; rootless already has it)
+if [ "$HOST_NETWORK" = true ] && [ "$MODE" = "rootful" ]; then
+    COMPOSE_FILES+=(-f "$SCRIPT_DIR/docker-compose.host-network.yml")
+    echo "Docker mode: $MODE (with host networking)"
+else
+    echo "Docker mode: $MODE"
+fi
+
+docker compose "${COMPOSE_FILES[@]}" build --quiet
+docker compose "${COMPOSE_FILES[@]}" run --rm claude-dev

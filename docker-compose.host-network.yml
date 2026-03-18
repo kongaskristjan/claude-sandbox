@@ -1,0 +1,3 @@
+services:
+  claude-dev:
+    network_mode: host
