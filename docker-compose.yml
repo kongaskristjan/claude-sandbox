@@ -18,6 +18,7 @@ services:
       - ${HOME}/.gitconfig:/tmp/host-gitconfig:ro
       - ${HOME}/.config/pulse/cookie:/tmp/host-pulse-cookie:ro
     working_dir: /workspace/project
+    shm_size: '8g'
     stdin_open: true
     tty: true
 
