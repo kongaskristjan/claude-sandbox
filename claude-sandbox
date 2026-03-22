@@ -32,10 +32,25 @@ done
 export PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 
 if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ ! -f "$HOME/.claude/.credentials.json" ]; then
-    echo "Error: No authentication found."
-    echo "Either export ANTHROPIC_API_KEY=sk-ant-... or run 'claude' on the host first to log in."
-    exit 1
+    # API billing stores the key in config.json as primaryApiKey
+    API_KEY_FROM_CONFIG=$(python3 -c "import json; print(json.load(open('$HOME/.claude/config.json')).get('primaryApiKey',''))" 2>/dev/null || true)
+    if [ -n "$API_KEY_FROM_CONFIG" ]; then
+        export ANTHROPIC_API_KEY="$API_KEY_FROM_CONFIG"
+    else
+        echo "Error: No authentication found."
+        echo "Either export ANTHROPIC_API_KEY=sk-ant-... or run 'claude' on the host first to log in."
+        exit 1
+    fi
 fi
+
+# Create placeholder files so Docker bind-mounts don't fail
+# when optional files don't exist.
+for f in "$HOME/.claude/.credentials.json" "$HOME/.claude.json" "$HOME/.gitconfig" "$HOME/.config/pulse/cookie"; do
+    if [ ! -f "$f" ]; then
+        mkdir -p "$(dirname "$f")"
+        touch "$f"
+    fi
+done
 
 # Detect rootless vs rootful Docker
 detect_docker_mode() {
