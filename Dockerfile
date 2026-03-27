@@ -23,6 +23,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+ENV UV_PROJECT_ENVIRONMENT=.venv-container \
+    UV_LINK_MODE=copy
+
 WORKDIR /workspace
 
 ENTRYPOINT ["/entrypoint.sh"]
