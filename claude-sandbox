@@ -6,9 +6,11 @@ BASE_COMPOSE="$SCRIPT_DIR/docker-compose.yml"
 export HOST_UID="$(id -u)"
 
 usage() {
-    echo "Usage: claude-sandbox [--host-network] [--update] [project-dir]"
+    echo "Usage: claude-sandbox [--gpu] [--host-network] [--update] [project-dir]"
     echo ""
     echo "Options:"
+    echo "  --gpu           Use the CUDA image with NVIDIA GPU passthrough"
+    echo "                  (default: CPU-only ubuntu:24.04 image)"
     echo "  --host-network  Use host networking (always enabled for rootless Docker,"
     echo "                  opt-in for rootful Docker)"
     echo "  --update        Rebuild the image from scratch to pick up a new Claude"
@@ -20,12 +22,14 @@ usage() {
     exit 0
 }
 
+GPU=false
 HOST_NETWORK=false
 UPDATE=false
 PROJECT_DIR=""
 
 for arg in "$@"; do
     case "$arg" in
+        --gpu) GPU=true ;;
         --host-network) HOST_NETWORK=true ;;
         --update) UPDATE=true ;;
         --help|-h) usage ;;
@@ -86,13 +90,18 @@ OVERRIDE_COMPOSE="$SCRIPT_DIR/docker-compose.${MODE}.yml"
 # Build compose file list
 COMPOSE_FILES=(-f "$BASE_COMPOSE" -f "$OVERRIDE_COMPOSE")
 
+if [ "$GPU" = true ]; then
+    COMPOSE_FILES+=(-f "$SCRIPT_DIR/docker-compose.gpu.yml")
+fi
+
 # Add host networking override if requested (meaningful for rootful; rootless already has it)
+STATUS="$MODE"
+[ "$GPU" = true ] && STATUS="$STATUS, gpu"
 if [ "$HOST_NETWORK" = true ] && [ "$MODE" = "rootful" ]; then
     COMPOSE_FILES+=(-f "$SCRIPT_DIR/docker-compose.host-network.yml")
-    echo "Docker mode: $MODE (with host networking)"
-else
-    echo "Docker mode: $MODE"
+    STATUS="$STATUS, host networking"
 fi
+echo "Docker mode: $STATUS"
 
 BUILD_ARGS=(--quiet)
 if [ "$UPDATE" = true ]; then
