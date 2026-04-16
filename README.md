@@ -72,13 +72,13 @@ Files are bind-mounted, so you can:
 ### Options
 
 ```
-Usage: claude-sandbox [--host-network] [--no-cache] [project-dir]
+Usage: claude-sandbox [--host-network] [--update] [project-dir]
 
 Options:
   --host-network  Use host networking (always enabled for rootless Docker,
                   opt-in for rootful Docker)
-  --no-cache      Rebuild the image from scratch (use to pick up a new
-                  Claude Code release; future runs reuse the new layers)
+  --update        Rebuild the image from scratch to pick up a new Claude
+                  Code release; future runs reuse the new cached layers
 
 Environment variables:
   CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection
