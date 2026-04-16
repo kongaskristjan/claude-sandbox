@@ -1,10 +1,7 @@
 services:
   claude-dev:
     build: .
-    runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - PULSE_SERVER=unix:/run/user/${HOST_UID:-1000}/pulse/native
       - PULSE_COOKIE=/tmp/host-pulse-cookie
