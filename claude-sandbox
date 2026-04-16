@@ -6,11 +6,13 @@ BASE_COMPOSE="$SCRIPT_DIR/docker-compose.yml"
 export HOST_UID="$(id -u)"
 
 usage() {
-    echo "Usage: claude-sandbox [--host-network] [project-dir]"
+    echo "Usage: claude-sandbox [--host-network] [--no-cache] [project-dir]"
     echo ""
     echo "Options:"
     echo "  --host-network  Use host networking (always enabled for rootless Docker,"
     echo "                  opt-in for rootful Docker)"
+    echo "  --no-cache      Rebuild the image from scratch (use to pick up a new"
+    echo "                  Claude Code release; future runs reuse the new layers)"
     echo ""
     echo "Environment variables:"
     echo "  CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection"
@@ -19,11 +21,13 @@ usage() {
 }
 
 HOST_NETWORK=false
+NO_CACHE=false
 PROJECT_DIR=""
 
 for arg in "$@"; do
     case "$arg" in
         --host-network) HOST_NETWORK=true ;;
+        --no-cache) NO_CACHE=true ;;
         --help|-h) usage ;;
         *) PROJECT_DIR="$arg" ;;
     esac
@@ -90,5 +94,10 @@ else
     echo "Docker mode: $MODE"
 fi
 
-docker compose "${COMPOSE_FILES[@]}" build --quiet
+BUILD_ARGS=(--quiet)
+if [ "$NO_CACHE" = true ]; then
+    BUILD_ARGS=(--no-cache)
+fi
+
+docker compose "${COMPOSE_FILES[@]}" build "${BUILD_ARGS[@]}"
 docker compose "${COMPOSE_FILES[@]}" run --rm claude-dev
