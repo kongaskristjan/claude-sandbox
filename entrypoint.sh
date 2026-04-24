@@ -17,6 +17,10 @@ fi
 # Ensure dev owns the .claude config directory (Docker volume starts as root)
 chown -R dev:dev /home/dev/.claude 2>/dev/null || true
 
+# Same for the uv cache volume
+mkdir -p /home/dev/.cache/uv
+chown -R dev:dev /home/dev/.cache 2>/dev/null || true
+
 # Copy host auth files so dev user can use the existing subscription
 mkdir -p /home/dev/.claude
 if [ -f /tmp/host-credentials.json ]; then
