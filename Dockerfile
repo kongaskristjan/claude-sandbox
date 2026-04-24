@@ -24,7 +24,8 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV UV_PROJECT_ENVIRONMENT=.venv-container \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    UV_CACHE_DIR=/home/dev/.cache/uv
 
 WORKDIR /workspace
 
