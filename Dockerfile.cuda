@@ -20,6 +20,12 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && cp /root/.local/bin/uv /usr/local/bin/ \
     && cp /root/.local/bin/uvx /usr/local/bin/
 
+# Pre-install Chromium + OS deps for the Playwright MCP server
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+RUN npx -y playwright@latest install --with-deps chromium \
+    && chmod -R a+rX /opt/playwright-browsers \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
