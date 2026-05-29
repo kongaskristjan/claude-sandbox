@@ -6,7 +6,7 @@ BASE_COMPOSE="$SCRIPT_DIR/docker-compose.yml"
 export HOST_UID="$(id -u)"
 
 usage() {
-    echo "Usage: claude-sandbox [--gpu] [--host-network] [--update] [project-dir]"
+    echo "Usage: claude-sandbox [--gpu] [--host-network] [--update] [--agents] [project-dir]"
     echo ""
     echo "Options:"
     echo "  --gpu           Use the CUDA image with NVIDIA GPU passthrough"
@@ -15,6 +15,8 @@ usage() {
     echo "                  opt-in for rootful Docker)"
     echo "  --update        Rebuild the image from scratch to pick up a new Claude"
     echo "                  Code release; future runs reuse the new cached layers"
+    echo "  --agents        Launch the background-agents view ('claude agents')"
+    echo "                  instead of an interactive session"
     echo ""
     echo "Environment variables:"
     echo "  CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection"
@@ -25,6 +27,7 @@ usage() {
 GPU=false
 HOST_NETWORK=false
 UPDATE=false
+AGENTS=false
 PROJECT_DIR=""
 
 for arg in "$@"; do
@@ -32,6 +35,7 @@ for arg in "$@"; do
         --gpu) GPU=true ;;
         --host-network) HOST_NETWORK=true ;;
         --update) UPDATE=true ;;
+        --agents) AGENTS=true ;;
         --help|-h) usage ;;
         *) PROJECT_DIR="$arg" ;;
     esac
@@ -108,5 +112,11 @@ if [ "$UPDATE" = true ]; then
     BUILD_ARGS=(--no-cache)
 fi
 
+# Override the default command to launch the background-agents view
+RUN_ARGS=()
+if [ "$AGENTS" = true ]; then
+    RUN_ARGS=(claude agents --dangerously-skip-permissions)
+fi
+
 docker compose "${COMPOSE_FILES[@]}" build "${BUILD_ARGS[@]}"
-docker compose "${COMPOSE_FILES[@]}" run --rm claude-dev
+docker compose "${COMPOSE_FILES[@]}" run --rm claude-dev ${RUN_ARGS[@]+"${RUN_ARGS[@]}"}

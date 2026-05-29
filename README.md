@@ -107,7 +107,7 @@ Files are bind-mounted, so you can:
 ### Options
 
 ```
-Usage: claude-sandbox [--gpu] [--host-network] [--update] [project-dir]
+Usage: claude-sandbox [--gpu] [--host-network] [--update] [--agents] [project-dir]
 
 Options:
   --gpu           Use the CUDA image with NVIDIA GPU passthrough
@@ -116,6 +116,8 @@ Options:
                   opt-in for rootful Docker)
   --update        Rebuild the image from scratch to pick up a new Claude
                   Code release; future runs reuse the new cached layers
+  --agents        Launch the background-agents view ('claude agents')
+                  instead of an interactive session
 
 Environment variables:
   CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection
