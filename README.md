@@ -67,28 +67,34 @@ Voice mode (`/voice`) works out of the box. The container routes audio through y
 
 ### Playwright MCP (browser automation)
 
-A headless Chromium build and its OS dependencies are pre-baked, so the
-[Playwright MCP server](https://github.com/microsoft/playwright-mcp) works without
-per-session setup. Register it **inside the container** with:
+A headless Chromium build and its OS dependencies are pre-baked, and the
+[Playwright MCP server](https://github.com/microsoft/playwright-mcp) is
+**auto-registered on container start** — so browser automation works with no
+setup. The entrypoint registers it (user scope) pinned to the browser revision
+baked into the image, with the flags this sandbox needs:
 
 ```bash
-claude mcp add playwright -- \
-  npx -y @playwright/mcp@$PLAYWRIGHT_MCP_VERSION --headless --browser chromium
+npx -y @playwright/mcp@$PLAYWRIGHT_MCP_VERSION --headless --browser chromium
 ```
 
-Notes:
-- Use `--browser chromium` (not the default Chrome channel) — no system Google Chrome
+- `--browser chromium` (not the default Chrome channel) — no system Google Chrome
   is installed, so the default channel fails; this targets the bundled Chromium.
+- `--headless` — there is no display in the container.
+
+Set `CLAUDE_SANDBOX_NO_PLAYWRIGHT=1` to skip registration (e.g. if you don't want
+the server spawned for sessions that never touch a browser).
+
+Notes:
 - `@playwright/mcp` bundles its own playwright-core pinned to a specific browser
   revision. The image installs the matching browser via the MCP's own installer,
   avoiding the "browser not installed" revision mismatch you get from a stable
   `playwright install`. `$PLAYWRIGHT_MCP_VERSION` (set in the image) is the version
-  whose browser is baked in.
-- `/opt/playwright-browsers` is a **persistent named volume**. If you register a newer
-  `@playwright/mcp` that needs a newer browser, run
-  `npx -y @playwright/mcp@<version> install-browser chrome-for-testing` once — it
-  downloads into the volume and is reused on later runs, so you never pay the download
-  twice and don't need to bump the Dockerfile.
+  the server is registered with and whose browser is baked in.
+- `/opt/playwright-browsers` is a **persistent named volume**. To use a newer
+  `@playwright/mcp`, re-register it and run
+  `npx -y @playwright/mcp@<version> install-browser chrome-for-testing` once — the
+  browser downloads into the volume and is reused on later runs, so you never pay
+  the download twice and don't need to bump the Dockerfile.
 - Add `--isolated` to the registration for a clean, in-memory profile per session.
 
 ### Editing files

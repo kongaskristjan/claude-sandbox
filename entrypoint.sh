@@ -43,6 +43,20 @@ if [ -f /tmp/host-claude.json ]; then
     chmod 600 /home/dev/.claude.json
 fi
 
+# Register the Playwright MCP server, pinned to the browser revision baked into
+# the image, with the flags this sandbox needs (--browser chromium, since no
+# system Chrome exists; --headless, since there is no display). This way the
+# agent gets a working browser without knowing any sandbox internals. Done here,
+# after the host config copy, because that copy would clobber a build-time
+# registration. remove-then-add keeps it idempotent across restarts. Set
+# CLAUDE_SANDBOX_NO_PLAYWRIGHT=1 to skip.
+if [ -z "$CLAUDE_SANDBOX_NO_PLAYWRIGHT" ] && [ -n "$PLAYWRIGHT_MCP_VERSION" ]; then
+    gosu dev env HOME=/home/dev claude mcp remove playwright -s user 2>/dev/null || true
+    gosu dev env HOME=/home/dev claude mcp add playwright -s user -- \
+        npx -y "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" --headless --browser chromium \
+        >/dev/null 2>&1 || true
+fi
+
 # Allow dev to access PulseAudio socket
 PULSE_DIR=$(find /run/user -maxdepth 2 -name pulse -type d 2>/dev/null | head -1)
 if [ -n "$PULSE_DIR" ]; then
