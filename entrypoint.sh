@@ -25,6 +25,11 @@ chown -R dev:dev /home/dev/.cache 2>/dev/null || true
 mkdir -p /home/dev/.local/share/uv/python
 chown -R dev:dev /home/dev/.local 2>/dev/null || true
 
+# Same for the Playwright browsers volume, so the MCP can install newer browser
+# revisions at runtime and have them persist across sessions
+mkdir -p /opt/playwright-browsers
+chown -R dev:dev /opt/playwright-browsers 2>/dev/null || true
+
 # Copy host auth files so dev user can use the existing subscription
 mkdir -p /home/dev/.claude
 if [ -f /tmp/host-credentials.json ]; then

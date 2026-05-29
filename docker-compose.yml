@@ -13,6 +13,7 @@ services:
       - pip-cache:/root/.cache/pip
       - uv-cache:/home/dev/.cache/uv
       - uv-python:/home/dev/.local/share/uv/python
+      - playwright-browsers:/opt/playwright-browsers
       - /run/user/${HOST_UID:-1000}/pulse:/run/user/${HOST_UID:-1000}/pulse
       - ${HOME}/.gitconfig:/tmp/host-gitconfig:ro
       - ${HOME}/.config/pulse/cookie:/tmp/host-pulse-cookie:ro
@@ -26,3 +27,4 @@ volumes:
   pip-cache:
   uv-cache:
   uv-python:
+  playwright-browsers:

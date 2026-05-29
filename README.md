@@ -65,6 +65,32 @@ The wrapper supports two auth methods:
 
 Voice mode (`/voice`) works out of the box. The container routes audio through your host's PulseAudio/PipeWire.
 
+### Playwright MCP (browser automation)
+
+A headless Chromium build and its OS dependencies are pre-baked, so the
+[Playwright MCP server](https://github.com/microsoft/playwright-mcp) works without
+per-session setup. Register it **inside the container** with:
+
+```bash
+claude mcp add playwright -- \
+  npx -y @playwright/mcp@$PLAYWRIGHT_MCP_VERSION --headless --browser chromium
+```
+
+Notes:
+- Use `--browser chromium` (not the default Chrome channel) — no system Google Chrome
+  is installed, so the default channel fails; this targets the bundled Chromium.
+- `@playwright/mcp` bundles its own playwright-core pinned to a specific browser
+  revision. The image installs the matching browser via the MCP's own installer,
+  avoiding the "browser not installed" revision mismatch you get from a stable
+  `playwright install`. `$PLAYWRIGHT_MCP_VERSION` (set in the image) is the version
+  whose browser is baked in.
+- `/opt/playwright-browsers` is a **persistent named volume**. If you register a newer
+  `@playwright/mcp` that needs a newer browser, run
+  `npx -y @playwright/mcp@<version> install-browser chrome-for-testing` once — it
+  downloads into the volume and is reused on later runs, so you never pay the download
+  twice and don't need to bump the Dockerfile.
+- Add `--isolated` to the registration for a clean, in-memory profile per session.
+
 ### Editing files
 
 Files are bind-mounted, so you can:
@@ -128,6 +154,7 @@ Security properties:
 - Claude Code (native binary with voice support)
 - uv (Python package manager)
 - git, curl, wget, build-essential, cmake
+- Headless Chromium + OS deps for the [Playwright MCP server](https://github.com/microsoft/playwright-mcp)
 
 ## File structure
 
