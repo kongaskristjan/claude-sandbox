@@ -156,7 +156,7 @@ Security properties:
 
 ## What's inside the container
 
-- Ubuntu 24.04 (default) or CUDA 12.6 + cuDNN on Ubuntu 24.04 (with `--gpu`)
+- Ubuntu 24.04 (default) or CUDA 13.0 + cuDNN on Ubuntu 24.04 (with `--gpu`)
 - Python 3.12 + pip + venv
 - Node.js 22
 - Claude Code (native binary with voice support)
