@@ -74,7 +74,7 @@ setup. The entrypoint registers it (user scope) pinned to the browser revision
 baked into the image, with the flags this sandbox needs:
 
 ```bash
-npx -y @playwright/mcp@$PLAYWRIGHT_MCP_VERSION --headless --browser chromium
+playwright-mcp --headless --browser chromium
 ```
 
 - `--browser chromium` (not the default Chrome channel) — no system Google Chrome
@@ -86,16 +86,16 @@ the server spawned for sessions that never touch a browser).
 
 Notes:
 - `@playwright/mcp` bundles its own playwright-core pinned to a specific browser
-  revision. The image installs the matching browser via the MCP's own installer,
-  avoiding the "browser not installed" revision mismatch you get from a stable
-  `playwright install`. `$PLAYWRIGHT_MCP_VERSION` (set in the image) is the version
-  the server is registered with and whose browser is baked in.
-- `/opt/playwright-browsers` is a **persistent named volume**. To use a newer
-  `@playwright/mcp`, re-register it and run
-  `npx -y @playwright/mcp@<version> install-browser chrome-for-testing` once — the
-  browser downloads into the volume and is reused on later runs, so you never pay
-  the download twice and don't need to bump the Dockerfile.
-- Add `--isolated` to the registration for a clean, in-memory profile per session.
+  revision. The image installs `@playwright/mcp@$PLAYWRIGHT_MCP_VERSION` globally
+  and drives the browser install through it, avoiding the "browser not installed"
+  revision mismatch you get from a stable `playwright install`. That one version
+  pin covers the server, its OS deps, and the browser.
+- `/opt/playwright-browsers` is a **persistent named volume**, so it masks
+  whatever the image has at that path. The browser is therefore baked into
+  `/opt/playwright-seed` inside the image, and the entrypoint copies any missing
+  revision into the volume at start. To upgrade, bump `PLAYWRIGHT_MCP_VERSION`
+  in the Dockerfile and rebuild — the next container start syncs the new
+  revision in, even on machines whose volume already exists.
 
 ### Editing files
 

@@ -20,23 +20,31 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && cp /root/.local/bin/uv /usr/local/bin/ \
     && cp /root/.local/bin/uvx /usr/local/bin/
 
-# Set up the browser + OS deps for the Playwright MCP server.
+# Set up the Playwright MCP server + browser + OS deps.
 # @playwright/mcp bundles its own (often alpha) playwright-core that pins a
-# specific Chrome-for-Testing revision, so installing the *stable* playwright
-# browser leaves a revision mismatch ("browser not installed") at runtime. We
-# therefore install the browser via the MCP's own installer, which guarantees a
-# match with the bundled playwright-core. PLAYWRIGHT_BROWSERS_PATH is a named
-# volume (see docker-compose.yml), so this baked browser is only a zero-setup
-# seed: if a newer @playwright/mcp needs a newer revision, run-time
-#   npx -y @playwright/mcp@<ver> install-browser chrome-for-testing
-# persists into the volume and is reused on later runs — no Dockerfile pin to
-# bump. OS deps need root, so they are baked here at build time.
+# specific Chrome-for-Testing revision, so the server, its OS deps, and the
+# browser must all come from the same package or the revisions drift apart
+# ("browser not installed" at runtime). Install the MCP globally and drive
+# install-deps and install-browser through it, making PLAYWRIGHT_MCP_VERSION
+# the single pin — this also lets entrypoint.sh register the server as the
+# global `playwright-mcp` bin, so MCP startup needs no npm registry access.
+#
+# PLAYWRIGHT_BROWSERS_PATH is a named volume (see docker-compose.yml). Docker
+# copies image content into a named volume only when the volume is first
+# created, so a browser baked directly into that path would be masked by any
+# pre-existing volume after a rebuild. Instead, bake the browser into
+# /opt/playwright-seed (outside the volume); entrypoint.sh syncs missing
+# revisions into the volume on every start.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
     PLAYWRIGHT_MCP_VERSION=0.0.75
-RUN npx -y playwright@latest install-deps chromium \
-    && npx -y @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} install-browser chrome-for-testing \
-    && chmod -R a+rX /opt/playwright-browsers \
-    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} \
+    && apt-get update \
+    && node "$(npm root -g)/@playwright/mcp/node_modules/playwright-core/cli.js" \
+        install-deps chromium \
+    && rm -rf /var/lib/apt/lists/* \
+    && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-seed \
+        playwright-mcp install-browser chrome-for-testing \
+    && chmod -R a+rX /opt/playwright-seed
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

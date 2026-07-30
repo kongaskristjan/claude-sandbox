@@ -25,10 +25,30 @@ chown -R dev:dev /home/dev/.cache 2>/dev/null || true
 mkdir -p /home/dev/.local/share/uv/python
 chown -R dev:dev /home/dev/.local 2>/dev/null || true
 
-# Same for the Playwright browsers volume, so the MCP can install newer browser
-# revisions at runtime and have them persist across sessions
+# The Playwright browsers dir is a named volume, which masks whatever the
+# image has at that path once the volume exists. Sync in any browser revision
+# baked into the image (under /opt/playwright-seed) that the volume doesn't
+# have yet, so a PLAYWRIGHT_MCP_VERSION bump reaches existing volumes on the
+# next start. Runtime installs by the MCP still land in the volume and persist.
 mkdir -p /opt/playwright-browsers
-chown -R dev:dev /opt/playwright-browsers 2>/dev/null || true
+chown dev:dev /opt/playwright-browsers 2>/dev/null || true
+if [ -d /opt/playwright-seed ]; then
+    for src in /opt/playwright-seed/*; do
+        [ -e "$src" ] || continue
+        dst="/opt/playwright-browsers/$(basename "$src")"
+        if [ ! -e "$dst" ]; then
+            # Copy under a temp name and rename, so a start interrupted
+            # mid-copy can't leave a half-populated revision that looks installed
+            rm -rf "$dst.tmp"
+            if cp -a "$src" "$dst.tmp" 2>/dev/null; then
+                chown -R dev:dev "$dst.tmp" 2>/dev/null || true
+                mv "$dst.tmp" "$dst"
+            else
+                rm -rf "$dst.tmp"
+            fi
+        fi
+    done
+fi
 
 # Copy host auth files so dev user can use the existing subscription
 mkdir -p /home/dev/.claude
@@ -46,14 +66,16 @@ fi
 # Register the Playwright MCP server, pinned to the browser revision baked into
 # the image, with the flags this sandbox needs (--browser chromium, since no
 # system Chrome exists; --headless, since there is no display). This way the
-# agent gets a working browser without knowing any sandbox internals. Done here,
-# after the host config copy, because that copy would clobber a build-time
-# registration. remove-then-add keeps it idempotent across restarts. Set
-# CLAUDE_SANDBOX_NO_PLAYWRIGHT=1 to skip.
-if [ -z "$CLAUDE_SANDBOX_NO_PLAYWRIGHT" ] && [ -n "$PLAYWRIGHT_MCP_VERSION" ]; then
+# agent gets a working browser without knowing any sandbox internals. The
+# server is the image's global `playwright-mcp` bin rather than npx, so its
+# version always matches the baked browser and startup needs no npm registry
+# access. Done here, after the host config copy, because that copy would
+# clobber a build-time registration. remove-then-add keeps it idempotent
+# across restarts. Set CLAUDE_SANDBOX_NO_PLAYWRIGHT=1 to skip.
+if [ -z "$CLAUDE_SANDBOX_NO_PLAYWRIGHT" ] && command -v playwright-mcp >/dev/null 2>&1; then
     gosu dev env HOME=/home/dev claude mcp remove playwright -s user 2>/dev/null || true
     gosu dev env HOME=/home/dev claude mcp add playwright -s user -- \
-        npx -y "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" --headless --browser chromium \
+        playwright-mcp --headless --browser chromium \
         >/dev/null 2>&1 || true
 fi
 
