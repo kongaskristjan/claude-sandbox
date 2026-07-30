@@ -74,12 +74,15 @@ setup. The entrypoint registers it (user scope) pinned to the browser revision
 baked into the image, with the flags this sandbox needs:
 
 ```bash
-playwright-mcp --headless --browser chromium
+playwright-mcp --headless --browser chromium --isolated
 ```
 
 - `--browser chromium` (not the default Chrome channel) — no system Google Chrome
   is installed, so the default channel fails; this targets the bundled Chromium.
 - `--headless` — there is no display in the container.
+- `--isolated` — keep the Chrome profile in memory. Without it, the MCP persists
+  a profile per client cwd (so one per worktree) into the browsers volume, which
+  grows without bound; the entrypoint prunes profiles older than a week.
 
 Set `CLAUDE_SANDBOX_NO_PLAYWRIGHT=1` to skip registration (e.g. if you don't want
 the server spawned for sessions that never touch a browser).

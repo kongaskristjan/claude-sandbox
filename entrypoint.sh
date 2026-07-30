@@ -49,6 +49,11 @@ if [ -d /opt/playwright-seed ]; then
         fi
     done
 fi
+# Without --isolated, the MCP persists a Chrome profile per client cwd into the
+# browsers volume (playwright-core puts profiles under PLAYWRIGHT_BROWSERS_PATH)
+# and nothing ever removes them — with one worktree per task that grew without
+# bound. New sessions run --isolated; prune what older sessions left behind.
+find /opt/playwright-browsers -maxdepth 1 -name 'mcp-*' -mtime +7 -exec rm -rf {} + 2>/dev/null || true
 
 # Copy host auth files so dev user can use the existing subscription
 mkdir -p /home/dev/.claude
@@ -65,7 +70,9 @@ fi
 
 # Register the Playwright MCP server, pinned to the browser revision baked into
 # the image, with the flags this sandbox needs (--browser chromium, since no
-# system Chrome exists; --headless, since there is no display). This way the
+# system Chrome exists; --headless, since there is no display; --isolated, so
+# the Chrome profile stays in memory instead of accreting one per client cwd
+# inside the browsers volume). This way the
 # agent gets a working browser without knowing any sandbox internals. The
 # server is the image's global `playwright-mcp` bin rather than npx, so its
 # version always matches the baked browser and startup needs no npm registry
@@ -75,7 +82,7 @@ fi
 if [ -z "$CLAUDE_SANDBOX_NO_PLAYWRIGHT" ] && command -v playwright-mcp >/dev/null 2>&1; then
     gosu dev env HOME=/home/dev claude mcp remove playwright -s user 2>/dev/null || true
     gosu dev env HOME=/home/dev claude mcp add playwright -s user -- \
-        playwright-mcp --headless --browser chromium \
+        playwright-mcp --headless --browser chromium --isolated \
         >/dev/null 2>&1 || true
 fi
 
