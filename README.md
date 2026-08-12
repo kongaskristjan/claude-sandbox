@@ -71,6 +71,20 @@ Expect a Keychain prompt on first use.
 
 Voice mode (`/voice`) works out of the box. The container routes audio through your host's PulseAudio/PipeWire.
 
+### GPU sharing (CUDA MPS)
+
+With `--gpu`, the entrypoint starts the CUDA MPS control daemon
+(`nvidia-cuda-mps-control -d`) so that several processes hitting the same GPU
+run their kernels concurrently in one context instead of being time-sliced —
+useful when Claude Code runs training, evaluation, and a notebook side by side.
+The pipe and log directories are `/tmp/nvidia-mps` and `/var/log/nvidia-mps`
+(exported as `CUDA_MPS_PIPE_DIRECTORY` / `CUDA_MPS_LOG_DIRECTORY`).
+
+Set `CLAUDE_SANDBOX_NO_MPS=1` to skip it — MPS clients share one server process,
+so a fatal fault in one can take down the others, and Nsight profiling of an MPS
+client is restricted. The CPU image ignores the variable; the daemon only starts
+when a GPU is actually passed through.
+
 ### Playwright MCP (browser automation)
 
 A headless Chromium build and its OS dependencies are pre-baked, and the
@@ -130,6 +144,7 @@ Options:
 
 Environment variables:
   CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection
+  CLAUDE_SANDBOX_NO_MPS=1               Don't start the CUDA MPS control daemon
   ANTHROPIC_API_KEY=sk-ant-...          Use API key instead of subscription
 ```
 
@@ -190,7 +205,7 @@ Security properties:
 ├── docker-compose.rootful.yml       # Rootful override: security hardening
 ├── docker-compose.gpu.yml           # Optional overlay: CUDA image + NVIDIA runtime
 ├── docker-compose.host-network.yml  # Optional overlay: host networking for rootful
-├── entrypoint.sh               # Permission setup, auth forwarding, ALSA→PulseAudio routing
+├── entrypoint.sh               # Permission setup, auth forwarding, ALSA→PulseAudio routing, CUDA MPS
 ├── claude-sandbox              # Convenience wrapper script (auto-detects Docker mode)
 └── README.md
 ```

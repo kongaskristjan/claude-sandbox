@@ -3,6 +3,7 @@ services:
     build: .
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_SANDBOX_NO_MPS=${CLAUDE_SANDBOX_NO_MPS:-}
       - PULSE_SERVER=unix:/run/user/${HOST_UID:-1000}/pulse/native
       - PULSE_COOKIE=/tmp/host-pulse-cookie
     volumes:

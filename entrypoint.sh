@@ -120,6 +120,26 @@ if [ -z "$CLAUDE_SANDBOX_NO_PLAYWRIGHT" ] && command -v playwright-mcp >/dev/nul
         >/dev/null 2>&1 || true
 fi
 
+# Start the CUDA MPS control daemon, so several processes sharing the GPU run
+# their kernels concurrently in one context instead of being time-sliced.
+# Only reachable in the --gpu image: nvidia-cuda-mps-control is a driver binary
+# the NVIDIA Container Toolkit mounts in (it ships with the "utility" driver
+# capability), and /dev/nvidiactl only exists when a GPU is passed through.
+# The daemon runs as root here; a root-run control daemon spawns a per-user MPS
+# server on demand, so dev connects as a client through the pipe directory —
+# hence the world-accessible mode on it. Both directory variables are exported
+# so the clients gosu starts below look in the same place.
+# Set CLAUDE_SANDBOX_NO_MPS=1 to skip (e.g. to profile with Nsight, or to keep
+# one client's fatal fault from taking down the others' shared server).
+if [ -z "$CLAUDE_SANDBOX_NO_MPS" ] && [ -e /dev/nvidiactl ] \
+   && command -v nvidia-cuda-mps-control >/dev/null 2>&1; then
+    export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps
+    export CUDA_MPS_LOG_DIRECTORY=/var/log/nvidia-mps
+    mkdir -p "$CUDA_MPS_PIPE_DIRECTORY" "$CUDA_MPS_LOG_DIRECTORY"
+    chmod 777 "$CUDA_MPS_PIPE_DIRECTORY"
+    nvidia-cuda-mps-control -d >/dev/null 2>&1 || true
+fi
+
 # Allow dev to access PulseAudio socket
 PULSE_DIR=$(find /run/user -maxdepth 2 -name pulse -type d 2>/dev/null | head -1)
 if [ -n "$PULSE_DIR" ]; then
