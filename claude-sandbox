@@ -79,6 +79,11 @@ for f in "$CLAUDE_CREDENTIALS_FILE" "$HOME/.claude.json" "$HOME/.gitconfig" "$HO
     fi
 done
 
+# Same for the host skills directory, which is bind-mounted into the container's
+# config volume. Create it ourselves rather than letting Docker do it — under
+# rootful Docker the daemon would create it owned by root.
+mkdir -p "$HOME/.claude/skills"
+
 # Detect rootless vs rootful Docker
 detect_docker_mode() {
     if [ -n "${CLAUDE_SANDBOX_MODE:-}" ]; then

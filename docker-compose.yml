@@ -11,6 +11,12 @@ services:
       - ${CLAUDE_CREDENTIALS_FILE:-${HOME}/.claude/.credentials.json}:/tmp/host-credentials.json:ro
       - ${HOME}/.claude.json:/tmp/host-claude.json:ro
       - claude-config:/home/dev/.claude
+      # Share the host's personal skills (~/.claude/skills) with the container,
+      # so a skill installed once on the host works in both places. Mounted
+      # inside the claude-config volume: Docker orders mounts by path depth, so
+      # the deeper bind wins at this subpath. Read-only — skills are inputs, and
+      # the container has no business writing to the host's config.
+      - ${HOME}/.claude/skills:/home/dev/.claude/skills:ro
       - pip-cache:/root/.cache/pip
       - uv-cache:/home/dev/.cache/uv
       - uv-python:/home/dev/.local/share/uv/python

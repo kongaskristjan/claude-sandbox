@@ -8,6 +8,7 @@ A Docker-based sandbox for running Claude Code with `--dangerously-skip-permissi
 - Ships a lightweight CPU image by default; opt in to a CUDA image with `--gpu` for deep learning workloads
 - Bind-mounts your project directory so you can edit files from both host (VS Code) and container (Claude Code)
 - Forwards your Claude subscription credentials (no re-login needed)
+- Shares your personal skills (`~/.claude/skills`), so they work inside and outside the sandbox
 - Enables voice mode (`/voice`) via PulseAudio/PipeWire passthrough
 - Auto-rebuilds the container image on each run
 - Auto-detects rootless vs rootful Docker and applies appropriate security settings
@@ -119,6 +120,19 @@ Notes:
   revision into the volume at start. To upgrade, bump `PLAYWRIGHT_MCP_VERSION`
   in the Dockerfile and rebuild — the next container start syncs the new
   revision in, even on machines whose volume already exists.
+
+### Personal skills
+
+Your host skills directory (`~/.claude/skills`) is bind-mounted read-only at
+`/home/dev/.claude/skills`, so a skill you install once on the host is available
+both when you run `claude` normally and when you run it in the sandbox. Drop a
+`~/.claude/skills/<name>/SKILL.md` on the host and the next container start picks
+it up — nothing to rebuild.
+
+The container's `~/.claude` is a persistent named volume, which would otherwise
+mask the host's skills; the mount targets a path *inside* that volume, and Docker
+orders mounts by path depth, so the deeper bind wins. It's read-only: skills are
+inputs, and the container has no business writing to the host's config.
 
 ### Editing files
 
