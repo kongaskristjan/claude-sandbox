@@ -1,11 +1,11 @@
 # claude-sandbox
 
-A Docker-based sandbox for running Claude Code with `--dangerously-skip-permissions` safely. Supports both CPU-only and NVIDIA GPU workflows.
+A Docker-based sandbox for running Claude Code with `--dangerously-skip-permissions` safely. Supports CPU-only, NVIDIA GPU, and Rust workflows.
 
 ## What it does
 
 - Runs Claude Code inside a Docker container so it can't affect your host system
-- Ships a lightweight CPU image by default; opt in to a CUDA image with `--gpu` for deep learning workloads
+- Ships a lightweight CPU image by default; opt in to a CUDA image with `--gpu` for deep learning workloads, or a Rust image with `--rust`
 - Bind-mounts your project directory so you can edit files from both host (VS Code) and container (Claude Code)
 - Forwards your Claude subscription credentials (no re-login needed)
 - Shares your personal skills (`~/.claude/skills`), so they work inside and outside the sandbox
@@ -33,7 +33,7 @@ Optionally add to your PATH:
 ln -s ~/claude-sandbox/claude-sandbox ~/.local/bin/claude-sandbox
 ```
 
-The first run will build the Docker image. The default CPU image is small; `--gpu` switches to a CUDA base image (~10GB download on first build).
+The first run will build the Docker image. The default CPU image is small; `--gpu` switches to a CUDA base image (~10GB download on first build); `--rust` builds a separate image with a rustup toolchain instead of Python.
 
 ## Usage
 
@@ -46,6 +46,9 @@ The first run will build the Docker image. The default CPU image is small; `--gp
 
 # Enable NVIDIA GPU passthrough with the CUDA image
 ~/claude-sandbox/claude-sandbox --gpu ~/projects/my-dl-project
+
+# Use the Rust image (rustup toolchain, cargo caches, no Python/CUDA)
+~/claude-sandbox/claude-sandbox --rust ~/projects/my-rust-project
 
 # Enable host networking (rootful Docker only — always on for rootless)
 ~/claude-sandbox/claude-sandbox --host-network ~/projects/my-dl-project
@@ -85,6 +88,41 @@ Set `CLAUDE_SANDBOX_NO_MPS=1` to skip it — MPS clients share one server proces
 so a fatal fault in one can take down the others, and Nsight profiling of an MPS
 client is restricted. The CPU image ignores the variable; the daemon only starts
 when a GPU is actually passed through.
+
+### Rust image
+
+`--rust` builds `Dockerfile.rust`: Ubuntu 24.04 with a rustup-managed stable
+toolchain (plus `rustfmt` and `clippy`), Node.js, Claude Code and the Playwright
+MCP — but no Python tooling and no CUDA. Common `-sys` crate build inputs
+(`pkg-config`, `libssl-dev`, `cmake`, `build-essential`) are present.
+
+Cargo's caches are persistent named volumes, the same way the uv cache is, so
+dependencies are downloaded and compiled once instead of once per container:
+
+| Volume | Path | Contents |
+| --- | --- | --- |
+| `cargo-registry` | `$CARGO_HOME/registry` | downloaded and unpacked crates |
+| `cargo-git` | `$CARGO_HOME/git` | git dependency checkouts |
+| `cargo-target` | `$CARGO_HOME/target` | build artifacts (`CARGO_TARGET_DIR`) |
+
+Two consequences of `CARGO_TARGET_DIR=/home/dev/.cargo/target`:
+
+- Builds inside the sandbox do **not** write a `target/` into your project
+  directory, so they can't collide with a `target/` the host built with a
+  different toolchain (the same reasoning behind `UV_PROJECT_ENVIRONMENT=.venv-container`
+  in the Python images). Artifacts live at `/home/dev/.cargo/target/<profile>/`
+  inside the container; `cargo run` and `cargo test` find them as usual. Run
+  `CARGO_TARGET_DIR=target cargo build` for the rare case where you want the
+  output in the project directory instead.
+- All projects share one target directory, so cargo reuses dependency builds
+  whose fingerprint (version, features, profile, compiler) matches across
+  projects. `docker volume rm claude-sandbox_cargo-target` clears it if it grows
+  too large.
+
+The toolchain itself lives in `$RUSTUP_HOME` (`/home/dev/.rustup`) and
+`$CARGO_HOME/bin` — image content, not volumes, so a rebuild always wins over
+what an old volume holds. `rustup update` and `cargo install` work inside a
+session but, like anything outside the cache volumes, don't survive it.
 
 ### Playwright MCP (browser automation)
 
@@ -144,11 +182,13 @@ Files are bind-mounted, so you can:
 ### Options
 
 ```
-Usage: claude-sandbox [--gpu] [--host-network] [--update] [--agents] [project-dir]
+Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents] [project-dir]
 
 Options:
   --gpu           Use the CUDA image with NVIDIA GPU passthrough
                   (default: CPU-only ubuntu:24.04 image)
+  --rust          Use the Rust image (rustup toolchain, no Python or
+                  CUDA) with persistent cargo registry and build caches
   --host-network  Use host networking (always enabled for rootless Docker,
                   opt-in for rootful Docker)
   --update        Refresh the Claude Code binary in the image (other layers
@@ -201,23 +241,36 @@ Security properties:
 
 ## What's inside the container
 
-- Ubuntu 24.04 (default) or CUDA 13.0 + cuDNN on Ubuntu 24.04 (with `--gpu`)
-- Python 3.12 + pip + venv
+Every image:
+
 - Node.js 22
 - Claude Code (native binary with voice support)
-- uv (Python package manager)
-- git, curl, wget, build-essential, cmake
+- git, git-lfs, curl, wget, build-essential, cmake
 - Headless Chromium + OS deps for the [Playwright MCP server](https://github.com/microsoft/playwright-mcp)
+
+Per image:
+
+| | default | `--gpu` | `--rust` |
+| --- | --- | --- | --- |
+| Base | Ubuntu 24.04 | CUDA 13.0 + cuDNN on Ubuntu 24.04 | Ubuntu 24.04 |
+| Python 3.12 + pip + venv + uv | ✅ | ✅ | —* |
+| CUDA toolkit / NVIDIA passthrough | — | ✅ | — |
+| rustup (stable, rustfmt, clippy) + cargo caches | — | — | ✅ |
+
+\* The Rust image installs no Python tooling, but a bare `python3` interpreter
+comes in as a dependency of the NodeSource `nodejs` package.
 
 ## File structure
 
 ```
 ├── Dockerfile                  # Default CPU image: Ubuntu 24.04 + Python + Claude Code + uv
 ├── Dockerfile.cuda             # Optional CUDA image (used with --gpu)
+├── Dockerfile.rust             # Optional Rust image (used with --rust)
 ├── docker-compose.yml          # Base shared configuration (audio, volumes)
 ├── docker-compose.rootless.yml      # Rootless override: host networking
 ├── docker-compose.rootful.yml       # Rootful override: security hardening
 ├── docker-compose.gpu.yml           # Optional overlay: CUDA image + NVIDIA runtime
+├── docker-compose.rust.yml          # Optional overlay: Rust image + cargo cache volumes
 ├── docker-compose.host-network.yml  # Optional overlay: host networking for rootful
 ├── entrypoint.sh               # Permission setup, auth forwarding, ALSA→PulseAudio routing, CUDA MPS
 ├── claude-sandbox              # Convenience wrapper script (auto-detects Docker mode)

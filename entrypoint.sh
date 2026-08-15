@@ -25,6 +25,18 @@ chown -R dev:dev /home/dev/.cache 2>/dev/null || true
 mkdir -p /home/dev/.local/share/uv/python
 chown -R dev:dev /home/dev/.local 2>/dev/null || true
 
+# Same for the Cargo dependency and build cache volumes (--rust image only;
+# CARGO_HOME is unset in the others). Only the mount points are chowned, not
+# their contents: the volumes start out empty and everything inside them is
+# written by dev, so a recursive pass would just re-walk a large cache on
+# every start.
+if [ -n "${CARGO_HOME:-}" ]; then
+    CARGO_DIRS=("$CARGO_HOME" "$CARGO_HOME/registry" "$CARGO_HOME/git"
+                "${CARGO_TARGET_DIR:-$CARGO_HOME/target}")
+    mkdir -p "${CARGO_DIRS[@]}"
+    chown dev:dev "${CARGO_DIRS[@]}" 2>/dev/null || true
+fi
+
 # The Playwright browsers dir is a named volume, which masks whatever the
 # image has at that path once the volume exists. Sync in any browser revision
 # baked into the image (under /opt/playwright-seed) that the volume doesn't

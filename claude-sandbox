@@ -6,11 +6,13 @@ BASE_COMPOSE="$SCRIPT_DIR/docker-compose.yml"
 export HOST_UID="$(id -u)"
 
 usage() {
-    echo "Usage: claude-sandbox [--gpu] [--host-network] [--update] [--agents] [project-dir]"
+    echo "Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents] [project-dir]"
     echo ""
     echo "Options:"
     echo "  --gpu           Use the CUDA image with NVIDIA GPU passthrough"
     echo "                  (default: CPU-only ubuntu:24.04 image)"
+    echo "  --rust          Use the Rust image (rustup toolchain, no Python or"
+    echo "                  CUDA) with persistent cargo registry and build caches"
     echo "  --host-network  Use host networking (always enabled for rootless Docker,"
     echo "                  opt-in for rootful Docker)"
     echo "  --update        Refresh the Claude Code binary in the image (other layers"
@@ -25,6 +27,7 @@ usage() {
 }
 
 GPU=false
+RUST=false
 HOST_NETWORK=false
 UPDATE=false
 AGENTS=false
@@ -33,6 +36,7 @@ PROJECT_DIR=""
 for arg in "$@"; do
     case "$arg" in
         --gpu) GPU=true ;;
+        --rust) RUST=true ;;
         --host-network) HOST_NETWORK=true ;;
         --update) UPDATE=true ;;
         --agents) AGENTS=true ;;
@@ -40,6 +44,11 @@ for arg in "$@"; do
         *) PROJECT_DIR="$arg" ;;
     esac
 done
+
+if [ "$GPU" = true ] && [ "$RUST" = true ]; then
+    echo "Error: --gpu and --rust select different images; pick one." >&2
+    exit 1
+fi
 
 export PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 
@@ -118,9 +127,14 @@ if [ "$GPU" = true ]; then
     COMPOSE_FILES+=(-f "$SCRIPT_DIR/docker-compose.gpu.yml")
 fi
 
+if [ "$RUST" = true ]; then
+    COMPOSE_FILES+=(-f "$SCRIPT_DIR/docker-compose.rust.yml")
+fi
+
 # Add host networking override if requested (meaningful for rootful; rootless already has it)
 STATUS="$MODE"
 [ "$GPU" = true ] && STATUS="$STATUS, gpu"
+[ "$RUST" = true ] && STATUS="$STATUS, rust"
 if [ "$HOST_NETWORK" = true ] && [ "$MODE" = "rootful" ]; then
     COMPOSE_FILES+=(-f "$SCRIPT_DIR/docker-compose.host-network.yml")
     STATUS="$STATUS, host networking"
