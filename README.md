@@ -14,7 +14,7 @@ A Docker-based sandbox for running Claude Code with `--dangerously-skip-permissi
 
 ## Prerequisites
 
-- Linux with Docker installed (rootless or rootful)
+- Linux with Docker installed (rootless or rootful), or macOS with Docker Desktop
 - NVIDIA GPU with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (only required when using `--gpu`)
 - Claude Code installed on the host and logged in (for subscription auth), or an `ANTHROPIC_API_KEY`
 - PulseAudio or PipeWire (for voice mode)
@@ -60,6 +60,12 @@ The wrapper supports two auth methods:
 
 1. **Claude subscription (default)**: If you've logged into Claude Code on the host (`claude` then follow OAuth flow), credentials are automatically forwarded to the container.
 2. **API key**: Export `ANTHROPIC_API_KEY` before running.
+
+On macOS, Claude Code stores subscription credentials in the login Keychain
+rather than `~/.claude/.credentials.json`, so there is no file to forward. The
+wrapper exports the Keychain item (`Claude Code-credentials`) to a private
+`0600` temp file for the life of the run, mounts that, and deletes it on exit.
+Expect a Keychain prompt on first use.
 
 ### Voice mode
 
