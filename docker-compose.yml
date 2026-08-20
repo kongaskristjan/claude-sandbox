@@ -7,7 +7,7 @@ services:
       - PULSE_COOKIE=/tmp/host-pulse-cookie
     volumes:
       - ${PROJECT_DIR:-.}:/workspace/project
-      - ${HOME}/.claude/.credentials.json:/tmp/host-credentials.json:ro
+      - ${CLAUDE_CREDENTIALS_FILE:-${HOME}/.claude/.credentials.json}:/tmp/host-credentials.json:ro
       - ${HOME}/.claude.json:/tmp/host-claude.json:ro
       - claude-config:/home/dev/.claude
       - pip-cache:/root/.cache/pip
