@@ -68,6 +68,40 @@ if [ -f /tmp/host-claude.json ]; then
     chmod 600 /home/dev/.claude.json
 fi
 
+# Pre-trust the mounted project. Claude Code records trust per absolute path
+# under .claude.json's "projects" key, and the host copy only ever holds host
+# paths, so every fresh container otherwise re-prompts for /workspace/project.
+# A malformed or empty .claude.json must not brick the sandbox, hence the
+# fallback to a minimal document and the non-fatal warning.
+if ! python3 - <<'TRUSTEOF'; then
+import json, os
+
+path = "/home/dev/.claude.json"
+try:
+    with open(path) as f:
+        config = json.load(f)
+except (OSError, ValueError):
+    config = {}
+if not isinstance(config, dict):
+    config = {}
+projects = config.setdefault("projects", {})
+if not isinstance(projects, dict):
+    projects = config["projects"] = {}
+project = projects.setdefault("/workspace/project", {})
+if not isinstance(project, dict):
+    project = projects["/workspace/project"] = {}
+project["hasTrustDialogAccepted"] = True
+
+tmp = path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(config, f, indent=2)
+os.replace(tmp, path)
+TRUSTEOF
+    echo "warning: could not pre-trust /workspace/project in .claude.json" >&2
+fi
+chown dev:dev /home/dev/.claude.json 2>/dev/null || true
+chmod 600 /home/dev/.claude.json 2>/dev/null || true
+
 # Register the Playwright MCP server, pinned to the browser revision baked into
 # the image, with the flags this sandbox needs (--browser chromium, since no
 # system Chrome exists; --headless, since there is no display; --isolated, so
