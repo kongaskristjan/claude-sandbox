@@ -12,10 +12,6 @@ RUN useradd -m -s /bin/bash -G root,audio dev
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs
 
-# Install Claude Code as native binary (has built-in audio for voice mode)
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && cp /root/.local/share/claude/versions/* /usr/local/bin/claude
-
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && cp /root/.local/bin/uv /usr/local/bin/ \
     && cp /root/.local/bin/uvx /usr/local/bin/
@@ -45,6 +41,16 @@ RUN npm install -g @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} \
     && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-seed \
         playwright-mcp install-browser chrome-for-testing \
     && chmod -R a+rX /opt/playwright-seed
+
+# Install Claude Code as native binary (has built-in audio for voice mode).
+# This layer sits after every other install so that invalidating it is cheap:
+# `claude-sandbox --update` changes CLAUDE_CACHE_BUST, which re-runs this RUN
+# (and the layers below it) while apt, node, uv and the Playwright browser
+# stay cached. The value is persisted on the host and passed on every build,
+# so later runs keep hitting the refreshed layer instead of the stale one.
+ARG CLAUDE_CACHE_BUST=0
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && cp /root/.local/share/claude/versions/* /usr/local/bin/claude
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
