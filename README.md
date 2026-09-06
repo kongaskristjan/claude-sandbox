@@ -123,8 +123,8 @@ Options:
                   (default: CPU-only ubuntu:24.04 image)
   --host-network  Use host networking (always enabled for rootless Docker,
                   opt-in for rootful Docker)
-  --update        Rebuild the image from scratch to pick up a new Claude
-                  Code release; future runs reuse the new cached layers
+  --update        Refresh the Claude Code binary in the image (other layers
+                  stay cached); future runs reuse the refreshed layer
   --agents        Launch the background-agents view ('claude agents')
                   instead of an interactive session
 
@@ -132,6 +132,13 @@ Environment variables:
   CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection
   ANTHROPIC_API_KEY=sk-ant-...          Use API key instead of subscription
 ```
+
+`--update` writes a timestamp to `~/.cache/claude-sandbox/claude-update-stamp`
+(or under `$XDG_CACHE_HOME`) and passes it to the build as `CLAUDE_CACHE_BUST`,
+the build arg right before the Claude install layer. Only that layer and the
+entrypoint copy are rebuilt; apt, node, uv and the Playwright browser stay
+cached. Because the stamp persists and is passed on every run, later runs keep
+using the refreshed layer instead of matching the stale one.
 
 ## Security model
 

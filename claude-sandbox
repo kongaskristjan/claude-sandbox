@@ -13,8 +13,8 @@ usage() {
     echo "                  (default: CPU-only ubuntu:24.04 image)"
     echo "  --host-network  Use host networking (always enabled for rootless Docker,"
     echo "                  opt-in for rootful Docker)"
-    echo "  --update        Rebuild the image from scratch to pick up a new Claude"
-    echo "                  Code release; future runs reuse the new cached layers"
+    echo "  --update        Refresh the Claude Code binary in the image (other layers"
+    echo "                  stay cached); future runs reuse the refreshed layer"
     echo "  --agents        Launch the background-agents view ('claude agents')"
     echo "                  instead of an interactive session"
     echo ""
@@ -122,9 +122,21 @@ if [ "$HOST_NETWORK" = true ] && [ "$MODE" = "rootful" ]; then
 fi
 echo "Docker mode: $STATUS"
 
-BUILD_ARGS=(--quiet)
+# --update bumps a stamp that feeds the CLAUDE_CACHE_BUST build arg, which sits
+# right before the Claude install layer in the Dockerfile. Docker keys layer
+# cache on the arg's value, so a one-off value would only help the update run
+# itself: the next plain build would pass the default again and match the old,
+# stale layer. Persist the stamp and pass it on every build so all later runs
+# resolve to the refreshed layer.
+STAMP_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-sandbox/claude-update-stamp"
 if [ "$UPDATE" = true ]; then
-    BUILD_ARGS=(--no-cache)
+    mkdir -p "$(dirname "$STAMP_FILE")"
+    date +%s > "$STAMP_FILE"
+fi
+CLAUDE_CACHE_BUST="$(cat "$STAMP_FILE" 2>/dev/null || echo 0)"
+BUILD_ARGS=(--build-arg "CLAUDE_CACHE_BUST=$CLAUDE_CACHE_BUST")
+if [ "$UPDATE" = false ]; then
+    BUILD_ARGS+=(--quiet)
 fi
 
 # Override the default command to launch the background-agents view
