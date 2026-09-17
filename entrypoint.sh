@@ -108,7 +108,7 @@ else
         chown dev:dev /home/dev/.claude.json
         chmod 600 /home/dev/.claude.json
     fi
- fi
+fi
 
 # Point opencode at an OpenAI-compatible server running on the host (the
 # --port flag). The container reaches the host over host networking, so
@@ -223,16 +223,31 @@ fi
 # access. Done here, after the host config copy, because that copy would
 # clobber a build-time registration. remove-then-add keeps it idempotent
 # across restarts. Set CLAUDE_SANDBOX_NO_PLAYWRIGHT=1 to skip.
+#
+# Full Chrome-for-Testing SIGTRAPs at startup (a crashpad-init
+# CHECK/IMMEDIATE_CRASH) under this sandbox's no-new-privileges +
+# default-seccomp + dropped-caps profile, so point the MCP at the stripped
+# chrome-headless-shell build (same revision, installed alongside it), which
+# does not run that path. The revision dir tracks PLAYWRIGHT_MCP_VERSION, so
+# glob at runtime and take the newest instead of hardcoding. If the shell is
+# not present, fall back to the default chromium (no --executable-path).
 if [ -z "$CLAUDE_SANDBOX_NO_PLAYWRIGHT" ] && command -v playwright-mcp >/dev/null 2>&1; then
+    SHELL_BIN="$(find /opt/playwright-browsers -maxdepth 3 -type f \
+        -path '*chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell' \
+        2>/dev/null | sort -V | tail -1)"
+    SHELL_ARGS=()
+    if [ -n "$SHELL_BIN" ] && [ -x "$SHELL_BIN" ]; then
+        SHELL_ARGS=(--executable-path "$SHELL_BIN")
+    fi
     if [ "$AGENT" = "opencode" ]; then
         gosu dev env HOME=/home/dev opencode mcp remove playwright 2>/dev/null || true
         gosu dev env HOME=/home/dev opencode mcp add playwright -- \
-            playwright-mcp --headless --browser chromium --isolated \
+            playwright-mcp --headless --browser chromium --isolated "${SHELL_ARGS[@]}" \
             >/dev/null 2>&1 || true
     else
         gosu dev env HOME=/home/dev claude mcp remove playwright -s user 2>/dev/null || true
         gosu dev env HOME=/home/dev claude mcp add playwright -s user -- \
-            playwright-mcp --headless --browser chromium --isolated \
+            playwright-mcp --headless --browser chromium --isolated "${SHELL_ARGS[@]}" \
             >/dev/null 2>&1 || true
     fi
 fi
