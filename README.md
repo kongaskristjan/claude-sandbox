@@ -47,6 +47,10 @@ The first run will build the Docker image. The default CPU image is small; `--gp
 # Run opencode instead of Claude Code (same image, chosen at runtime)
 ~/claude-sandbox/claude-sandbox --opencode ~/projects/my-project
 
+# Point opencode at an OpenAI-compatible server on the host (e.g. a local
+# 'openai serve' on port 8080) instead of a hosted provider
+~/claude-sandbox/claude-sandbox --opencode --port 8080 ~/projects/my-project
+
 # Enable NVIDIA GPU passthrough with the CUDA image
 ~/claude-sandbox/claude-sandbox --gpu ~/projects/my-dl-project
 
@@ -86,6 +90,16 @@ forwarded the same way; its state (the running `auth.json`, `opencode.db`)
 persists across runs in the `opencode-data` named volume. Unlike Claude
 subscription auth, a missing opencode auth file is **not** fatal — opencode can
 also log in interactively inside the container.
+
+**`--port <port>`** points opencode at an OpenAI-compatible server running on the
+host (for example a local `openai serve`) instead of a hosted provider. The
+wrapper auto-enables host networking so the container can reach the host, and the
+entrypoint merges a `local` provider into opencode's config targeting
+`http://127.0.0.1:<port>/v1`, auto-discovering the server's models from
+`/v1/models` and pre-selecting the first one so `--auto` starts without a prompt
+(a user-set `model` in the forwarded config is left alone). It's opencode-only:
+passing `--port` without `--opencode` is an error. Override the target host with
+`OPENCODE_API_HOST` (default `127.0.0.1`, correct under host networking).
 
 ### Voice mode
 
@@ -198,7 +212,7 @@ Files are bind-mounted, so you can:
 ### Options
 
 ```
-Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents|--opencode] [project-dir]
+Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents|--opencode] [--port <port>] [project-dir]
 
 Options:
   --gpu           Use the CUDA image with NVIDIA GPU passthrough
@@ -213,6 +227,9 @@ Options:
                   instead of an interactive session
   --opencode      Run opencode instead of Claude Code (same image; the agent
                   is selected at runtime, not baked into one)
+  --port <port>   (--opencode only) Point opencode at an OpenAI-compatible
+                  server running on the host at this port; auto-enables host
+                  networking and auto-discovers the server's models
 
 Environment variables:
   CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection

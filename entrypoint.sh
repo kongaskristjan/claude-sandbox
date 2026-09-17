@@ -108,6 +108,71 @@ else
         chown dev:dev /home/dev/.claude.json
         chmod 600 /home/dev/.claude.json
     fi
+ fi
+
+# Point opencode at an OpenAI-compatible server running on the host (the
+# --port flag). The container reaches the host over host networking, so
+# 127.0.0.1 *is* the host. Merges a "local" provider into the container's
+# opencode.json (preserving the user's forwarded config) and, when the server
+# is already up, pre-selects one of its models so 'opencode --auto' starts
+# without a model prompt.
+if [ "$AGENT" = "opencode" ] && [ -n "${OPENCODE_API_PORT:-}" ]; then
+if ! python3 - <<'OPENAIEOF'; then
+import json, os, urllib.request
+
+path = "/home/dev/.config/opencode/opencode.json"
+port = os.environ.get("OPENCODE_API_PORT", "").strip()
+host = os.environ.get("OPENCODE_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
+base_url = "http://%s:%s/v1" % (host, port)
+
+try:
+    with open(path) as f:
+        cfg = json.load(f)
+except (OSError, ValueError):
+    cfg = {}
+if not isinstance(cfg, dict):
+    cfg = {}
+
+# Best-effort discovery of the models the local server advertises; if it isn't
+# up yet, skip and let opencode's own /models picker re-query later.
+models = {}
+try:
+    with urllib.request.urlopen(base_url + "/models", timeout=5) as r:
+        payload = json.load(r)
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, list):
+        for m in data:
+            if isinstance(m, dict):
+                mid = m.get("id")
+                if isinstance(mid, str) and mid:
+                    models[mid] = {"name": mid}
+except Exception:
+    pass
+
+provider = {
+    "npm": "@ai-sdk/openai-compatible",
+    "name": "OpenAI serve (host)",
+    "options": {"baseURL": base_url},
+}
+if models:
+    provider["models"] = models
+prov = cfg.get("provider")
+if not isinstance(prov, dict):
+    prov = {}
+    cfg["provider"] = prov
+prov["local"] = provider
+if models and "model" not in cfg:
+    cfg["model"] = "local/" + next(iter(models))
+
+tmp = path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(cfg, f, indent=2)
+os.replace(tmp, path)
+OPENAIEOF
+    echo "warning: could not point opencode at the host OpenAI server (port $OPENCODE_API_PORT)" >&2
+fi
+chown dev:dev /home/dev/.config/opencode/opencode.json 2>/dev/null || true
+chmod 600 /home/dev/.config/opencode/opencode.json 2>/dev/null || true
 fi
 
 # Pre-trust the mounted project. Claude Code records trust per absolute path

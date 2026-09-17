@@ -8,6 +8,12 @@ services:
       # the wrapper is run with --opencode). Lets the entrypoint skip the
       # Claude-only auth/trust steps without a separate image.
       - SANDBOX_AGENT=${SANDBOX_AGENT:-claude}
+      # Host OpenAI-compatible server port (--port, opencode only). Empty unless
+      # --port is passed; the entrypoint points opencode at
+      # http://OPENCODE_API_HOST:OPENCODE_API_PORT/v1 and otherwise leaves
+      # opencode's normal provider/auth in place.
+      - OPENCODE_API_PORT=${OPENCODE_API_PORT:-}
+      - OPENCODE_API_HOST=${OPENCODE_API_HOST:-127.0.0.1}
       - PULSE_SERVER=unix:/run/user/${HOST_UID:-1000}/pulse/native
       - PULSE_COOKIE=/tmp/host-pulse-cookie
     volumes:

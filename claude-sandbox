@@ -6,7 +6,7 @@ BASE_COMPOSE="$SCRIPT_DIR/docker-compose.yml"
 export HOST_UID="$(id -u)"
 
 usage() {
-    echo "Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents|--opencode] [project-dir]"
+    echo "Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents|--opencode] [--port <port>] [project-dir]"
     echo ""
     echo "Options:"
     echo "  --gpu           Use the CUDA image with NVIDIA GPU passthrough"
@@ -21,10 +21,14 @@ usage() {
     echo "                  instead of an interactive session"
     echo "  --opencode      Run opencode instead of Claude Code (same image; the"
     echo "                  agent is selected at runtime, not baked into one)"
+    echo "  --port <port>   (--opencode only) Point opencode at an OpenAI-compatible"
+    echo "                  server running on the host at this port; auto-enables"
+    echo "                  host networking and auto-discovers its models"
     echo ""
     echo "Environment variables:"
     echo "  CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection"
     echo "  ANTHROPIC_API_KEY=sk-ant-...          Use API key instead of subscription"
+    echo "  OPENCODE_API_HOST=127.0.0.1          Host address --port targets (opencode)"
     exit 0
 }
 
@@ -34,19 +38,29 @@ HOST_NETWORK=false
 UPDATE=false
 AGENTS=false
 OPENCODE=false
+PORT=""
 PROJECT_DIR=""
 
-for arg in "$@"; do
-    case "$arg" in
+while [ "$#" -gt 0 ]; do
+    case "$1" in
         --gpu) GPU=true ;;
         --rust) RUST=true ;;
         --host-network) HOST_NETWORK=true ;;
         --update) UPDATE=true ;;
         --agents) AGENTS=true ;;
         --opencode) OPENCODE=true ;;
+        --port)
+            if [ "$#" -lt 2 ]; then
+                echo "Error: --port requires a port number." >&2
+                exit 1
+            fi
+            PORT="$2"
+            shift
+            ;;
         --help|-h) usage ;;
-        *) PROJECT_DIR="$arg" ;;
+        *) PROJECT_DIR="$1" ;;
     esac
+    shift
 done
 
 if [ "$GPU" = true ] && [ "$RUST" = true ]; then
@@ -59,6 +73,17 @@ if [ "$OPENCODE" = true ] && [ "$AGENTS" = true ]; then
     exit 1
 fi
 
+if [ -n "$PORT" ]; then
+    if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+        echo "Error: --port must be a number between 1 and 65535 (got: $PORT)." >&2
+        exit 1
+    fi
+    if [ "$OPENCODE" != true ]; then
+        echo "Error: --port only applies to --opencode." >&2
+        exit 1
+    fi
+fi
+
 export PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 
 # Which agent the entrypoint launches. Orthogonal to the image: opencode is
@@ -69,6 +94,12 @@ if [ "$OPENCODE" = true ]; then
 else
     export SANDBOX_AGENT="claude"
 fi
+
+# Port of a host OpenAI-compatible server (--port); empty unless --port is
+# given. The entrypoint uses it (opencode only) to point opencode at
+# http://127.0.0.1:<port>/v1 over host networking, where 127.0.0.1 is the host.
+export OPENCODE_API_PORT="${PORT:-}"
+export OPENCODE_API_HOST="${OPENCODE_API_HOST:-127.0.0.1}"
 
 # Host-side auth source for each agent, mounted read-only into the container.
 # Both are always defined so the placeholder step below can touch them.
@@ -154,6 +185,13 @@ detect_docker_mode() {
 
 MODE="$(detect_docker_mode)"
 OVERRIDE_COMPOSE="$SCRIPT_DIR/docker-compose.${MODE}.yml"
+
+# --port reaches a service on the host, which the container can only do over
+# host networking (127.0.0.1). Rootless already has host networking; opt
+# rootful runs in too so the flag behaves the same in both modes.
+if [ -n "$PORT" ] && [ "$MODE" = "rootful" ]; then
+    HOST_NETWORK=true
+fi
 
 # Build compose file list
 COMPOSE_FILES=(-f "$BASE_COMPOSE" -f "$OVERRIDE_COMPOSE")
