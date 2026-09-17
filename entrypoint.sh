@@ -6,6 +6,11 @@ set -e
 # We use ACLs to ensure both root (=host user) and dev can read/write
 # all project files.
 
+# Which agent this run launches (claude by default; opencode when the wrapper
+# passed SANDBOX_AGENT=opencode). Lets the steps below skip the Claude-only
+# auth/trust handling without a separate image.
+AGENT="${SANDBOX_AGENT:-claude}"
+
 if [ -d /workspace/project ]; then
     # Give dev access to existing host-owned files
     setfacl -R -m u:dev:rwX /workspace/project 2>/dev/null || true
@@ -16,6 +21,13 @@ fi
 
 # Ensure dev owns the .claude config directory (Docker volume starts as root)
 chown -R dev:dev /home/dev/.claude 2>/dev/null || true
+
+# opencode's config and state+auth dirs are named volumes too and start root
+# owned; dev must own them to read its own auth.json and write opencode.db.
+if [ "$AGENT" = "opencode" ]; then
+    mkdir -p /home/dev/.config/opencode /home/dev/.local/share/opencode
+    chown -R dev:dev /home/dev/.config/opencode /home/dev/.local/share/opencode 2>/dev/null || true
+fi
 
 # Same for the uv cache volume
 mkdir -p /home/dev/.cache/uv
@@ -67,24 +79,44 @@ fi
 # bound. New sessions run --isolated; prune what older sessions left behind.
 find /opt/playwright-browsers -maxdepth 1 -name 'mcp-*' -mtime +7 -exec rm -rf {} + 2>/dev/null || true
 
-# Copy host auth files so dev user can use the existing subscription
-mkdir -p /home/dev/.claude
-if [ -f /tmp/host-credentials.json ]; then
-    cp /tmp/host-credentials.json /home/dev/.claude/.credentials.json
-    chown dev:dev /home/dev/.claude/.credentials.json
-    chmod 600 /home/dev/.claude/.credentials.json
-fi
-if [ -f /tmp/host-claude.json ]; then
-    cp /tmp/host-claude.json /home/dev/.claude.json
-    chown dev:dev /home/dev/.claude.json
-    chmod 600 /home/dev/.claude.json
+# Copy host auth files so dev user can use the existing credentials
+if [ "$AGENT" = "opencode" ]; then
+    # opencode keeps auth.json under ~/.local/share/opencode and opencode.json
+    # under ~/.config/opencode; the host copies arrive at these /tmp paths.
+    mkdir -p /home/dev/.local/share/opencode /home/dev/.config/opencode
+    if [ -f /tmp/host-opencode-auth.json ]; then
+        cp /tmp/host-opencode-auth.json /home/dev/.local/share/opencode/auth.json
+        chown dev:dev /home/dev/.local/share/opencode/auth.json
+        chmod 600 /home/dev/.local/share/opencode/auth.json
+    fi
+    if [ -f /tmp/host-opencode.json ]; then
+        cp /tmp/host-opencode.json /home/dev/.config/opencode/opencode.json
+        chown dev:dev /home/dev/.config/opencode/opencode.json
+        chmod 600 /home/dev/.config/opencode/opencode.json
+    fi
+else
+    # Claude Code keeps .credentials.json under ~/.claude and .claude.json in
+    # the home dir; the host copies arrive at these /tmp paths.
+    mkdir -p /home/dev/.claude
+    if [ -f /tmp/host-credentials.json ]; then
+        cp /tmp/host-credentials.json /home/dev/.claude/.credentials.json
+        chown dev:dev /home/dev/.claude/.credentials.json
+        chmod 600 /home/dev/.claude/.credentials.json
+    fi
+    if [ -f /tmp/host-claude.json ]; then
+        cp /tmp/host-claude.json /home/dev/.claude.json
+        chown dev:dev /home/dev/.claude.json
+        chmod 600 /home/dev/.claude.json
+    fi
 fi
 
 # Pre-trust the mounted project. Claude Code records trust per absolute path
 # under .claude.json's "projects" key, and the host copy only ever holds host
 # paths, so every fresh container otherwise re-prompts for /workspace/project.
 # A malformed or empty .claude.json must not brick the sandbox, hence the
-# fallback to a minimal document and the non-fatal warning.
+# fallback to a minimal document and the non-fatal warning. opencode has no
+# per-directory trust dialog, so this whole step is Claude-only.
+if [ "$AGENT" = "claude" ]; then
 if ! python3 - <<'TRUSTEOF'; then
 import json, os
 
@@ -113,6 +145,7 @@ TRUSTEOF
 fi
 chown dev:dev /home/dev/.claude.json 2>/dev/null || true
 chmod 600 /home/dev/.claude.json 2>/dev/null || true
+fi
 
 # Register the Playwright MCP server, pinned to the browser revision baked into
 # the image, with the flags this sandbox needs (--browser chromium, since no
@@ -126,10 +159,17 @@ chmod 600 /home/dev/.claude.json 2>/dev/null || true
 # clobber a build-time registration. remove-then-add keeps it idempotent
 # across restarts. Set CLAUDE_SANDBOX_NO_PLAYWRIGHT=1 to skip.
 if [ -z "$CLAUDE_SANDBOX_NO_PLAYWRIGHT" ] && command -v playwright-mcp >/dev/null 2>&1; then
-    gosu dev env HOME=/home/dev claude mcp remove playwright -s user 2>/dev/null || true
-    gosu dev env HOME=/home/dev claude mcp add playwright -s user -- \
-        playwright-mcp --headless --browser chromium --isolated \
-        >/dev/null 2>&1 || true
+    if [ "$AGENT" = "opencode" ]; then
+        gosu dev env HOME=/home/dev opencode mcp remove playwright 2>/dev/null || true
+        gosu dev env HOME=/home/dev opencode mcp add playwright -- \
+            playwright-mcp --headless --browser chromium --isolated \
+            >/dev/null 2>&1 || true
+    else
+        gosu dev env HOME=/home/dev claude mcp remove playwright -s user 2>/dev/null || true
+        gosu dev env HOME=/home/dev claude mcp add playwright -s user -- \
+            playwright-mcp --headless --browser chromium --isolated \
+            >/dev/null 2>&1 || true
+    fi
 fi
 
 # Start the CUDA MPS control daemon, so several processes sharing the GPU run

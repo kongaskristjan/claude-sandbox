@@ -52,6 +52,13 @@ ARG CLAUDE_CACHE_BUST=0
 RUN curl -fsSL https://claude.ai/install.sh | bash \
     && cp /root/.local/share/claude/versions/* /usr/local/bin/claude
 
+# Install opencode alongside Claude Code. It is a standalone native binary,
+# copied to /usr/local/bin so the non-root dev user can run it. The agent is
+# chosen at runtime (SANDBOX_AGENT), not by which image is built, so it is
+# installed in every image.
+RUN curl -fsSL https://opencode.ai/install | bash \
+    && cp /root/.opencode/bin/opencode /usr/local/bin/opencode
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

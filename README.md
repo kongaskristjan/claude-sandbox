@@ -44,6 +44,9 @@ The first run will build the Docker image. The default CPU image is small; `--gp
 # Run in a specific project
 ~/claude-sandbox/claude-sandbox ~/projects/my-dl-project
 
+# Run opencode instead of Claude Code (same image, chosen at runtime)
+~/claude-sandbox/claude-sandbox --opencode ~/projects/my-project
+
 # Enable NVIDIA GPU passthrough with the CUDA image
 ~/claude-sandbox/claude-sandbox --gpu ~/projects/my-dl-project
 
@@ -56,7 +59,7 @@ The first run will build the Docker image. The default CPU image is small; `--gp
 
 The wrapper auto-detects whether Docker is rootless or rootful and prints the detected mode at startup. Use `--host-network` when you need the container to access services on localhost (e.g., a dev server on port 8080).
 
-Claude Code starts with `--dangerously-skip-permissions` inside the container. Your project files are mounted at `/workspace/project`.
+Claude Code starts with `--dangerously-skip-permissions` inside the container (opencode starts with the equivalent `--auto`). Your project files are mounted at `/workspace/project`.
 
 ### Authentication
 
@@ -70,6 +73,19 @@ rather than `~/.claude/.credentials.json`, so there is no file to forward. The
 wrapper exports the Keychain item (`Claude Code-credentials`) to a private
 `0600` temp file for the life of the run, mounts that, and deletes it on exit.
 Expect a Keychain prompt on first use.
+
+**opencode** (`--opencode`) authenticates differently from Claude Code:
+
+- **API key**: Export `ANTHROPIC_API_KEY` before running — opencode honors it
+  for the Anthropic provider.
+- **Forwarded login**: If you've logged into opencode on the host, the wrapper
+  forwards `~/.local/share/opencode/auth.json` (read-only) into the container.
+
+opencode's config lives at `~/.config/opencode/opencode.json` on the host and is
+forwarded the same way; its state (the running `auth.json`, `opencode.db`)
+persists across runs in the `opencode-data` named volume. Unlike Claude
+subscription auth, a missing opencode auth file is **not** fatal — opencode can
+also log in interactively inside the container.
 
 ### Voice mode
 
@@ -182,7 +198,7 @@ Files are bind-mounted, so you can:
 ### Options
 
 ```
-Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents] [project-dir]
+Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents|--opencode] [project-dir]
 
 Options:
   --gpu           Use the CUDA image with NVIDIA GPU passthrough
@@ -195,6 +211,8 @@ Options:
                   stay cached); future runs reuse the refreshed layer
   --agents        Launch the background-agents view ('claude agents')
                   instead of an interactive session
+  --opencode      Run opencode instead of Claude Code (same image; the agent
+                  is selected at runtime, not baked into one)
 
 Environment variables:
   CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection
@@ -245,6 +263,7 @@ Every image:
 
 - Node.js 22
 - Claude Code (native binary with voice support)
+- opencode (native binary; run it instead of Claude Code with `--opencode`)
 - git, git-lfs, curl, wget, build-essential, cmake
 - Headless Chromium + OS deps for the [Playwright MCP server](https://github.com/microsoft/playwright-mcp)
 

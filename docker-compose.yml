@@ -4,6 +4,10 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - CLAUDE_SANDBOX_NO_MPS=${CLAUDE_SANDBOX_NO_MPS:-}
+      # Which agent the entrypoint launches (claude by default; opencode when
+      # the wrapper is run with --opencode). Lets the entrypoint skip the
+      # Claude-only auth/trust steps without a separate image.
+      - SANDBOX_AGENT=${SANDBOX_AGENT:-claude}
       - PULSE_SERVER=unix:/run/user/${HOST_UID:-1000}/pulse/native
       - PULSE_COOKIE=/tmp/host-pulse-cookie
     volumes:
@@ -17,6 +21,15 @@ services:
       # the deeper bind wins at this subpath. Read-only — skills are inputs, and
       # the container has no business writing to the host's config.
       - ${HOME}/.claude/skills:/home/dev/.claude/skills:ro
+      # opencode equivalents, so both agents can be installed in one image. The
+      # host auth.json and opencode.json are read-only bind mounts (the wrapper
+      # touch's both on the host so the mounts never fail); the config and
+      # state+auth dirs are named volumes that persist across runs, the same
+      # way claude-config does.
+      - ${OPENCODE_AUTH_FILE:-${HOME}/.local/share/opencode/auth.json}:/tmp/host-opencode-auth.json:ro
+      - ${OPENCODE_CONFIG_FILE:-${HOME}/.config/opencode/opencode.json}:/tmp/host-opencode.json:ro
+      - opencode-config:/home/dev/.config/opencode
+      - opencode-data:/home/dev/.local/share/opencode
       - pip-cache:/root/.cache/pip
       - uv-cache:/home/dev/.cache/uv
       - uv-python:/home/dev/.local/share/uv/python
@@ -31,6 +44,8 @@ services:
 
 volumes:
   claude-config:
+  opencode-config:
+  opencode-data:
   pip-cache:
   uv-cache:
   uv-python:

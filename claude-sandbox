@@ -6,7 +6,7 @@ BASE_COMPOSE="$SCRIPT_DIR/docker-compose.yml"
 export HOST_UID="$(id -u)"
 
 usage() {
-    echo "Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents] [project-dir]"
+    echo "Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents|--opencode] [project-dir]"
     echo ""
     echo "Options:"
     echo "  --gpu           Use the CUDA image with NVIDIA GPU passthrough"
@@ -19,6 +19,8 @@ usage() {
     echo "                  stay cached); future runs reuse the refreshed layer"
     echo "  --agents        Launch the background-agents view ('claude agents')"
     echo "                  instead of an interactive session"
+    echo "  --opencode      Run opencode instead of Claude Code (same image; the"
+    echo "                  agent is selected at runtime, not baked into one)"
     echo ""
     echo "Environment variables:"
     echo "  CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection"
@@ -31,6 +33,7 @@ RUST=false
 HOST_NETWORK=false
 UPDATE=false
 AGENTS=false
+OPENCODE=false
 PROJECT_DIR=""
 
 for arg in "$@"; do
@@ -40,6 +43,7 @@ for arg in "$@"; do
         --host-network) HOST_NETWORK=true ;;
         --update) UPDATE=true ;;
         --agents) AGENTS=true ;;
+        --opencode) OPENCODE=true ;;
         --help|-h) usage ;;
         *) PROJECT_DIR="$arg" ;;
     esac
@@ -50,38 +54,69 @@ if [ "$GPU" = true ] && [ "$RUST" = true ]; then
     exit 1
 fi
 
-export PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
-
-# Claude Code on macOS keeps subscription credentials in the login Keychain,
-# not in ~/.claude/.credentials.json (a Linux-only path), so there is no file to
-# forward and no amount of logging in on the host creates one. Export the
-# Keychain item to a private file for the life of this run and mount that.
-export CLAUDE_CREDENTIALS_FILE="$HOME/.claude/.credentials.json"
-if [ "$(uname -s)" = "Darwin" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    KEYCHAIN_CREDS="$(mktemp "${TMPDIR:-/tmp}/claude-sandbox-credentials.XXXXXX")"
-    chmod 600 "$KEYCHAIN_CREDS"
-    trap 'rm -f "$KEYCHAIN_CREDS"' EXIT
-    if security find-generic-password -s "Claude Code-credentials" -w \
-        > "$KEYCHAIN_CREDS" 2>/dev/null && [ -s "$KEYCHAIN_CREDS" ]; then
-        export CLAUDE_CREDENTIALS_FILE="$KEYCHAIN_CREDS"
-    fi
+if [ "$OPENCODE" = true ] && [ "$AGENTS" = true ]; then
+    echo "Error: --opencode and --agents select different agents; pick one." >&2
+    exit 1
 fi
 
-if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ ! -s "$CLAUDE_CREDENTIALS_FILE" ]; then
-    # API billing stores the key in config.json as primaryApiKey
-    API_KEY_FROM_CONFIG=$(python3 -c "import json; print(json.load(open('$HOME/.claude/config.json')).get('primaryApiKey',''))" 2>/dev/null || true)
-    if [ -n "$API_KEY_FROM_CONFIG" ]; then
-        export ANTHROPIC_API_KEY="$API_KEY_FROM_CONFIG"
-    else
-        echo "Error: No authentication found."
-        echo "Either export ANTHROPIC_API_KEY=sk-ant-... or run 'claude' on the host first to log in."
-        exit 1
+export PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+
+# Which agent the entrypoint launches. Orthogonal to the image: opencode is
+# installed in every image and picked at runtime, so it composes with
+# --rust/--gpu/--host-network.
+if [ "$OPENCODE" = true ]; then
+    export SANDBOX_AGENT="opencode"
+else
+    export SANDBOX_AGENT="claude"
+fi
+
+# Host-side auth source for each agent, mounted read-only into the container.
+# Both are always defined so the placeholder step below can touch them.
+export CLAUDE_CREDENTIALS_FILE="$HOME/.claude/.credentials.json"
+export OPENCODE_AUTH_FILE="$HOME/.local/share/opencode/auth.json"
+export OPENCODE_CONFIG_FILE="$HOME/.config/opencode/opencode.json"
+
+if [ "$OPENCODE" = true ]; then
+    # opencode auths from the forwarded auth.json (above) or ANTHROPIC_API_KEY
+    # (already passed through compose). There is no Keychain/credentials-file
+    # step. Missing auth is not fatal: opencode can also log in interactively.
+    if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ ! -s "$OPENCODE_AUTH_FILE" ]; then
+        echo "Warning: no opencode auth found."
+        echo "Either export ANTHROPIC_API_KEY=sk-ant-... or run 'opencode' on the host first to log in."
+    fi
+else
+    # Claude Code on macOS keeps subscription credentials in the login Keychain,
+    # not in ~/.claude/.credentials.json (a Linux-only path), so there is no file
+    # to forward and no amount of logging in on the host creates one. Export the
+    # Keychain item to a private file for the life of this run and mount that.
+    if [ "$(uname -s)" = "Darwin" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        KEYCHAIN_CREDS="$(mktemp "${TMPDIR:-/tmp}/claude-sandbox-credentials.XXXXXX")"
+        chmod 600 "$KEYCHAIN_CREDS"
+        trap 'rm -f "$KEYCHAIN_CREDS"' EXIT
+        if security find-generic-password -s "Claude Code-credentials" -w \
+            > "$KEYCHAIN_CREDS" 2>/dev/null && [ -s "$KEYCHAIN_CREDS" ]; then
+            export CLAUDE_CREDENTIALS_FILE="$KEYCHAIN_CREDS"
+        fi
+    fi
+
+    if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ ! -s "$CLAUDE_CREDENTIALS_FILE" ]; then
+        # API billing stores the key in config.json as primaryApiKey
+        API_KEY_FROM_CONFIG=$(python3 -c "import json; print(json.load(open('$HOME/.claude/config.json')).get('primaryApiKey',''))" 2>/dev/null || true)
+        if [ -n "$API_KEY_FROM_CONFIG" ]; then
+            export ANTHROPIC_API_KEY="$API_KEY_FROM_CONFIG"
+        else
+            echo "Error: No authentication found."
+            echo "Either export ANTHROPIC_API_KEY=sk-ant-... or run 'claude' on the host first to log in."
+            exit 1
+        fi
     fi
 fi
 
 # Create placeholder files so Docker bind-mounts don't fail
-# when optional files don't exist.
-for f in "$CLAUDE_CREDENTIALS_FILE" "$HOME/.claude.json" "$HOME/.gitconfig" "$HOME/.config/pulse/cookie"; do
+# when optional files don't exist. Both agents' mounted host files are covered
+# (touching the unused set is harmless) so either agent works out of the box.
+for f in "$CLAUDE_CREDENTIALS_FILE" "$HOME/.claude.json" "$HOME/.gitconfig" "$HOME/.config/pulse/cookie" \
+         "$OPENCODE_AUTH_FILE" "$OPENCODE_CONFIG_FILE"; do
     if [ ! -f "$f" ]; then
         mkdir -p "$(dirname "$f")"
         touch "$f"
@@ -158,9 +193,12 @@ if [ "$UPDATE" = false ]; then
     BUILD_ARGS+=(--quiet)
 fi
 
-# Override the default command to launch the background-agents view
+# Override the default command to launch a specific agent/view. opencode runs
+# in the compose working_dir (/workspace/project), so it takes no project arg.
 RUN_ARGS=()
-if [ "$AGENTS" = true ]; then
+if [ "$OPENCODE" = true ]; then
+    RUN_ARGS=(opencode --auto)
+elif [ "$AGENTS" = true ]; then
     RUN_ARGS=(claude agents --dangerously-skip-permissions)
 fi
 
