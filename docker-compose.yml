@@ -2,10 +2,13 @@ services:
   claude-dev:
     build: .
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_API_KEY=${SANDBOX_ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${SANDBOX_OPENAI_API_KEY:-}
+      - SANDBOX_API_KEYS=${SANDBOX_API_KEYS:-false}
+      - CODEX_HOME=/home/dev/.codex
       - CLAUDE_SANDBOX_NO_MPS=${CLAUDE_SANDBOX_NO_MPS:-}
-      # Which agent the entrypoint launches (claude by default; opencode when
-      # the wrapper is run with --opencode). Lets the entrypoint skip the
+      # Which agent the entrypoint launches (claude by default; opencode or codex
+      # when selected by the wrapper). Lets the entrypoint skip the
       # Claude-only auth/trust steps without a separate image.
       - SANDBOX_AGENT=${SANDBOX_AGENT:-claude}
       # Host OpenAI-compatible server port (--port, opencode only). Empty unless
@@ -18,8 +21,8 @@ services:
       - PULSE_COOKIE=/tmp/host-pulse-cookie
     volumes:
       - ${PROJECT_DIR:-.}:/workspace/project
-      - ${CLAUDE_CREDENTIALS_FILE:-${HOME}/.claude/.credentials.json}:/tmp/host-credentials.json:ro
-      - ${HOME}/.claude.json:/tmp/host-claude.json:ro
+      - ${CLAUDE_CREDENTIALS_FILE:?Run the claude-sandbox wrapper to stage credentials}:/tmp/host-credentials.json:ro
+      - ${CLAUDE_CONFIG_FILE:?Run the claude-sandbox wrapper}:/tmp/host-claude.json:ro
       - claude-config:/home/dev/.claude
       # Share the host's personal skills (~/.claude/skills) with the container,
       # so a skill installed once on the host works in both places. Mounted
@@ -27,13 +30,11 @@ services:
       # the deeper bind wins at this subpath. Read-only — skills are inputs, and
       # the container has no business writing to the host's config.
       - ${HOME}/.claude/skills:/home/dev/.claude/skills:ro
-      # opencode equivalents, so both agents can be installed in one image. The
-      # host auth.json and opencode.json are read-only bind mounts (the wrapper
-      # touch's both on the host so the mounts never fail); the config and
-      # state+auth dirs are named volumes that persist across runs, the same
-      # way claude-config does.
-      - ${OPENCODE_AUTH_FILE:-${HOME}/.local/share/opencode/auth.json}:/tmp/host-opencode-auth.json:ro
-      - ${OPENCODE_CONFIG_FILE:-${HOME}/.config/opencode/opencode.json}:/tmp/host-opencode.json:ro
+      # Private host-side copies; the wrapper filters API keys before mounting.
+      - ${OPENCODE_AUTH_FILE:?Run the claude-sandbox wrapper}:/tmp/host-opencode-auth.json:ro
+      - ${OPENCODE_CONFIG_FILE:?Run the claude-sandbox wrapper}:/tmp/host-opencode.json:ro
+      - ${CODEX_AUTH_FILE:?Run the claude-sandbox wrapper}:/tmp/host-codex-auth.json:ro
+      - codex-config:/home/dev/.codex
       - opencode-config:/home/dev/.config/opencode
       - opencode-data:/home/dev/.local/share/opencode
       - pip-cache:/root/.cache/pip
@@ -49,6 +50,7 @@ services:
     tty: true
 
 volumes:
+  codex-config:
   claude-config:
   opencode-config:
   opencode-data:

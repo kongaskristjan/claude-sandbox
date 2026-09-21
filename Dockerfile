@@ -59,6 +59,11 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 RUN curl -fsSL https://opencode.ai/install | bash \
     && cp /root/.opencode/bin/opencode /usr/local/bin/opencode
 
+# Codex is selected at runtime, just like Claude Code and opencode.
+ARG CODEX_CACHE_BUST=0
+RUN npm install -g @openai/codex
+
+COPY prepare-auth.py /usr/local/lib/claude-sandbox/prepare-auth.py
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
