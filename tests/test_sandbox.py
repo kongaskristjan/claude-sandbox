@@ -6,8 +6,15 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +32,21 @@ LOGIN = {
     },
     "last_refresh": "2026-09-21T00:00:00Z",
 }
+CONFIG = '''# Host preferences
+model = "test-model"
+profile = "work"
+model_reasoning_effort = "high"
+[profiles.work]
+model = "work-model"
+[mcp_servers.example]
+command = "example-mcp"
+[mcp_servers.example.env]
+OPENAI_API_KEY = "config-api-secret"
+NORMAL_SETTING = "keep-me"
+[model_providers.custom]
+base_url = "https://example.invalid/v1"
+experimental_bearer_token = "provider-secret"
+'''
 
 
 class AuthTests(unittest.TestCase):
@@ -61,6 +83,45 @@ class AuthTests(unittest.TestCase):
             "mcpServers": {"test": {"env": {}}},
         })
 
+    def test_codex_toml_filter_preserves_config_types_and_quoted_keys(self):
+        contents = '''
+"custom.🚀" = { enabled = true, values = [1, 0.25, "line\\nquote\\\""], api_key = "secret" }
+date = 2026-09-22
+time = 12:30:00
+timestamp = 2026-09-22T12:30:00Z
+[[servers]]
+name = "one"
+[[servers]]
+name = "two"
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "config.toml"
+            destination = Path(directory) / "filtered.toml"
+            source.write_text(contents)
+            auth.stage_codex_config(source, destination)
+            expected = tomllib.loads(contents)
+            del expected["custom.🚀"]["api_key"]
+            self.assertEqual(tomllib.loads(destination.read_text()), expected)
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+
+    def test_codex_config_falls_back_when_tomllib_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "config.toml"
+            destination = Path(directory) / "filtered.toml"
+            source.write_text(CONFIG)
+            # Exercise the older-Python import path using the available TOML
+            # parser, without requiring an extra dependency on newer Python.
+            with patch.dict(sys.modules, {"tomllib": None, "tomli": tomllib}):
+                auth.stage_codex_config(source, destination)
+            config = tomllib.loads(destination.read_text())
+            self.assertEqual(config["profile"], "work")
+            self.assertNotIn("secret", destination.read_text())
+
+    def test_codex_config_explains_missing_toml_dependency(self):
+        with patch.dict(sys.modules, {"tomllib": None, "tomli": None}):
+            with self.assertRaisesRegex(SystemExit, "python3 -m pip install tomli"):
+                auth.stage_codex_config(Path("unused"), Path("unused"))
+
 
 class SandboxTests(unittest.TestCase):
     def setUp(self):
@@ -84,6 +145,24 @@ class SandboxTests(unittest.TestCase):
             "CAPTURE": str(self.base / "capture.json"),
         }
         self.write(self.host / "custom codex/auth.json", LOGIN)
+        self.setup = self.host / "custom codex"
+        (self.setup / "config.toml").write_text(CONFIG)
+        (self.setup / "work.config.toml").write_text('model = "profile-model"\n')
+        (self.setup / "AGENTS.md").write_text("Personal instructions\n")
+        (self.setup / "rules").mkdir()
+        (self.setup / "rules/default.rules").write_text('prefix_rule(pattern=["git"], decision="allow")\n')
+        (self.setup / "agents").mkdir()
+        (self.setup / "agents/reviewer.toml").write_text(CONFIG)
+        (self.setup / "skills").mkdir()
+        shared = self.host / ".agents/skills/example"
+        shared.mkdir(parents=True)
+        (shared / "SKILL.md").write_text("Shared skill\n")
+        (shared / "helper.sh").write_text("#!/bin/sh\nexit 0\n")
+        (shared / "helper.sh").chmod(0o755)
+        (self.setup / "skills/linked").symlink_to(shared, target_is_directory=True)
+        (self.setup / "history.jsonl").write_text("private host history\n")
+        (self.setup / "sessions").mkdir()
+        (self.setup / "sessions/session.jsonl").write_text("private session\n")
         self.write(self.host / ".claude/.credentials.json", {
             "claudeAiOauth": {"accessToken": "claude-oauth"}, "primaryApiKey": "secret"
         })
@@ -105,6 +184,10 @@ if "run" in sys.argv:
             "files": {key: pathlib.Path(path).read_text() for key, path in paths.items()},
             "modes": {key: pathlib.Path(path).stat().st_mode & 0o777 for key, path in paths.items()},
             "env": dict(os.environ)}
+    setup = pathlib.Path(os.environ["CODEX_SETUP_DIR"])
+    data["setup"] = {str(path.relative_to(setup)): path.read_text()
+                     for path in setup.rglob("*") if path.is_file()}
+    data["setup_links"] = [str(path) for path in setup.rglob("*") if path.is_symlink()]
     pathlib.Path(os.environ["CAPTURE"]).write_text(json.dumps(data))
 ''')
 
@@ -144,13 +227,47 @@ if "run" in sys.argv:
     def test_default_codex_home(self):
         del self.env["CODEX_HOME"]
         self.write(self.host / ".codex/auth.json", LOGIN)
+        (self.host / ".codex/config.toml").write_text('model = "default-home-model"\n')
         data = self.launch("--codex")
         self.assertIn("oauth-access", data["files"]["CODEX_AUTH_FILE"])
+        self.assertIn("default-home-model", data["setup"]["codex/config.toml"])
+
+    def test_codex_setup_is_copied_and_filtered(self):
+        data = self.launch("--codex")
+        setup = data["setup"]
+        config = tomllib.loads(setup["codex/config.toml"])
+        self.assertEqual(config["profiles"]["work"]["model"], "work-model")
+        self.assertEqual(config["mcp_servers"]["example"]["env"], {"NORMAL_SETTING": "keep-me"})
+        self.assertEqual(config["model_providers"]["custom"], {"base_url": "https://example.invalid/v1"})
+        self.assertIn("profile-model", setup["codex/work.config.toml"])
+        self.assertEqual(setup["codex/AGENTS.md"], "Personal instructions\n")
+        self.assertIn("prefix_rule", setup["codex/rules/default.rules"])
+        self.assertEqual(setup["codex/skills/linked/SKILL.md"], "Shared skill\n")
+        self.assertEqual(setup["agents/skills/example/SKILL.md"], "Shared skill\n")
+        self.assertFalse(data["setup_links"])
+        self.assertNotIn("secret", str(setup))
+        self.assertNotIn("private", str(setup))
+        self.assertNotIn("codex/auth.json", setup)
+        self.assertFalse(Path(data["env"]["CODEX_SETUP_DIR"]).exists())
+        self.assertEqual((self.setup / "config.toml").read_text(), CONFIG)
+
+    def test_missing_codex_setup_leaves_host_untouched(self):
+        missing = self.host / "missing codex"
+        self.env["CODEX_HOME"] = str(missing)
+        data = self.launch("--codex")
+        self.assertFalse(missing.exists())
+        self.assertFalse(any(path.startswith("codex/") for path in data["setup"]))
+
+    def test_malformed_codex_config_fails_before_docker(self):
+        (self.setup / "config.toml").write_text("[broken")
+        self.launch("--codex", success=False)
+        self.assertFalse(list(self.base.glob("claude-sandbox-auth.*")))
 
     def test_api_keys_require_opt_in(self):
         data = self.launch("--codex", "--api-keys")
         self.assertEqual(json.loads(data["files"]["CODEX_AUTH_FILE"]), LOGIN)
         self.assertEqual(data["env"]["SANDBOX_OPENAI_API_KEY"], "environment-openai-secret")
+        self.assertEqual(data["setup"]["codex/config.toml"], CONFIG)
 
     def test_missing_malformed_and_api_only_codex_login(self):
         path = self.host / "custom codex/auth.json"
@@ -175,6 +292,7 @@ if "run" in sys.argv:
                 self.assertEqual(data["env"]["SANDBOX_AGENT"], agent)
                 self.assertNotIn("secret", str(data["files"]))
                 self.assertEqual(data["files"]["CODEX_AUTH_FILE"], "")
+                self.assertEqual(data["setup"], {})
 
     def test_legacy_claude_key_is_opt_in(self):
         (self.host / ".claude/.credentials.json").unlink()
@@ -213,9 +331,11 @@ echo '{"claudeAiOauth":{"accessToken":"keychain-oauth"},"primaryApiKey":"secret"
                     self.assertEqual(service["environment"]["CODEX_HOME"], "/home/dev/.codex")
                     mounts = {m["target"]: m for m in service["volumes"]}
                     self.assertTrue(mounts["/tmp/host-codex-auth.json"]["read_only"])
+                    self.assertTrue(mounts["/tmp/host-codex-setup"]["read_only"])
+                    self.assertEqual(mounts["/tmp/host-codex-setup"]["source"], data["env"]["CODEX_SETUP_DIR"])
                     self.assertEqual(mounts["/home/dev/.codex"]["type"], "volume")
 
-    def run_entrypoint(self, host_login, persisted=None, api_keys="false"):
+    def run_entrypoint(self, host_login, persisted=None, api_keys="false", setup=False):
         sandbox = self.base / "container"
         sandbox.mkdir(exist_ok=True)
         for directory in ("home/dev/.codex", "run/user", "tmp", "etc"):
@@ -224,6 +344,12 @@ echo '{"claudeAiOauth":{"accessToken":"keychain-oauth"},"primaryApiKey":"secret"
             self.write(sandbox / "tmp/host-codex-auth.json", host_login)
         if persisted is not None:
             self.write(sandbox / "home/dev/.codex/auth.json", persisted)
+        (sandbox / "home/dev/.codex/local.config.toml").write_text(CONFIG)
+        (sandbox / "home/dev/.codex/history.jsonl").write_text("sandbox history\n")
+        if setup:
+            destination = sandbox / "tmp/host-codex-setup"
+            auth.stage_codex_setup(self.setup, destination / "codex", api_keys == "true")
+            shutil.copytree(self.host / ".agents", destination / "agents")
         for command in ("chown", "setfacl", "playwright-mcp"):
             self.executable(command, "#!/bin/bash\nexit 0\n")
         self.executable("gosu", '#!/bin/bash\nprintf "%s\\n" "$*" >> "$GOSU_LOG"\n')
@@ -240,18 +366,26 @@ echo '{"claudeAiOauth":{"accessToken":"keychain-oauth"},"primaryApiKey":"secret"
         return sandbox / "home/dev/.codex/auth.json"
 
     def test_entrypoint_copies_login_and_registers_codex_mcp(self):
-        path = self.run_entrypoint(auth.filter_auth("codex", LOGIN))
+        path = self.run_entrypoint(auth.filter_auth("codex", LOGIN), setup=True)
         self.assertEqual(json.loads(path.read_text())["tokens"], LOGIN["tokens"])
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         calls = (self.base / "gosu.log").read_text()
         self.assertIn("codex mcp add playwright -- playwright-mcp", calls)
         self.assertNotIn("claude mcp", calls)
         self.assertIn("dev codex --dangerously-bypass-approvals-and-sandbox", calls)
+        self.assertEqual(tomllib.loads((path.parent / "config.toml").read_text())["profile"], "work")
+        self.assertEqual((path.parent / "AGENTS.md").read_text(), "Personal instructions\n")
+        self.assertTrue(os.access(path.parent / "skills/linked/helper.sh", os.X_OK))
+        self.assertEqual((path.parent.parent / ".agents/skills/example/SKILL.md").read_text(), "Shared skill\n")
+        self.assertEqual((path.parent / "history.jsonl").read_text(), "sandbox history\n")
 
     def test_entrypoint_keeps_sandbox_login_without_host_login(self):
         path = self.run_entrypoint(None, persisted=LOGIN)
         self.assertEqual(json.loads(path.read_text())["tokens"], LOGIN["tokens"])
         self.assertNotIn("OPENAI_API_KEY", json.loads(path.read_text()))
+        config = (path.parent / "local.config.toml").read_text()
+        self.assertEqual(tomllib.loads(config)["profile"], "work")
+        self.assertNotIn("secret", config)
 
     def test_entrypoint_removes_old_api_only_auth_without_opt_in(self):
         path = self.run_entrypoint(None, persisted={"OPENAI_API_KEY": "secret"})

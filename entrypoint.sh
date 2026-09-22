@@ -82,6 +82,29 @@ find /opt/playwright-browsers -maxdepth 1 -name 'mcp-*' -mtime +7 -exec rm -rf {
 if [ "$AGENT" = "codex" ]; then
     export CODEX_HOME=/home/dev/.codex
     mkdir -p "$CODEX_HOME"
+    # Overlay host setup on the writable volume before login and MCP setup.
+    # Missing host files leave sandbox-created config and sessions intact.
+    if [ -d /tmp/host-codex-setup/codex ]; then
+        cp -R /tmp/host-codex-setup/codex/. "$CODEX_HOME/"
+    fi
+    if [ -d /tmp/host-codex-setup/agents ]; then
+        mkdir -p /home/dev/.agents
+        cp -R /tmp/host-codex-setup/agents/. /home/dev/.agents/
+        chown -R dev:dev /home/dev/.agents
+    fi
+    # Remove API keys retained in config by earlier --api-keys runs too.
+    while IFS= read -r -d '' config; do
+        python3 /usr/local/lib/claude-sandbox/prepare-auth.py codex-config \
+            "$config" "$config.tmp" "${SANDBOX_API_KEYS:-false}"
+        mv "$config.tmp" "$config"
+    done < <(find "$CODEX_HOME" -maxdepth 1 -type f -name '*.toml' -print0)
+    if [ -d "$CODEX_HOME/agents" ]; then
+        while IFS= read -r -d '' config; do
+            python3 /usr/local/lib/claude-sandbox/prepare-auth.py codex-config \
+                "$config" "$config.tmp" "${SANDBOX_API_KEYS:-false}"
+            mv "$config.tmp" "$config"
+        done < <(find "$CODEX_HOME/agents" -type f -name '*.toml' -print0)
+    fi
     chown -R dev:dev "$CODEX_HOME"
     chmod 700 "$CODEX_HOME"
     if [ -s /tmp/host-codex-auth.json ]; then

@@ -34,6 +34,7 @@ services:
       - ${OPENCODE_AUTH_FILE:?Run the claude-sandbox wrapper}:/tmp/host-opencode-auth.json:ro
       - ${OPENCODE_CONFIG_FILE:?Run the claude-sandbox wrapper}:/tmp/host-opencode.json:ro
       - ${CODEX_AUTH_FILE:?Run the claude-sandbox wrapper}:/tmp/host-codex-auth.json:ro
+      - ${CODEX_SETUP_DIR:?Run the claude-sandbox wrapper}:/tmp/host-codex-setup:ro
       - codex-config:/home/dev/.codex
       - opencode-config:/home/dev/.config/opencode
       - opencode-data:/home/dev/.local/share/opencode

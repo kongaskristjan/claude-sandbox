@@ -17,9 +17,13 @@ A Docker-based sandbox for running Claude Code, OpenCode, or Codex with automati
 
 - Linux with Docker installed (rootless or rootful), or macOS with Docker Desktop
 - NVIDIA GPU with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (only required when using `--gpu`)
-- Python 3 on the host (for staging credentials without API keys)
+- Python 3 on the host (with `tomli` installed on Python older than 3.11 for copying Codex TOML configuration)
 - Your chosen agent logged in on the host, or an API key with explicit `--api-keys` opt-in
 - PulseAudio or PipeWire (for voice mode)
+
+On Python older than 3.11, install the Codex configuration parser with
+`python3 -m pip install tomli`. Python 3.11+ uses the built-in `tomllib` module
+and needs no additional package.
 
 ## Setup
 
@@ -48,7 +52,7 @@ The first run will build the Docker image. The default CPU image is small; `--gp
 # Run opencode instead of Claude Code (same image, chosen at runtime)
 ~/claude-sandbox/claude-sandbox --opencode ~/projects/my-project
 
-# Run Codex with your host ChatGPT login (also works with --rust or --gpu)
+# Run Codex with your host ChatGPT login and setup (also works with --rust or --gpu)
 ~/claude-sandbox/claude-sandbox --codex ~/projects/my-project
 
 # Explicitly opt in to API-key forwarding
@@ -79,10 +83,11 @@ Subscription/OAuth logins transfer by default. **API keys do not**: exporting
 `--api-keys` to forward those variables and stored API-key credentials. This
 opt-in applies to all three agents, including Claude's legacy `primaryApiKey`.
 
-The wrapper stages only the selected agent's auth/config in private `0600`
-temporary files and mounts those copies read-only. It filters API-key auth
-entries and API-key fields in JSON config before Docker can access them, then
-removes the temporary files on exit. Host auth/config files are not modified.
+The wrapper stages only the selected agent's auth/config in private temporary
+storage (auth and config files use `0600`) and mounts those copies read-only.
+It filters API-key auth entries and API-key fields in JSON and Codex TOML config
+before Docker can access them, then removes the temporary files on exit.
+Host auth/config files are not modified.
 Use the wrapper rather than invoking Compose directly so this staging happens.
 
 **Claude Code** (default): Run `claude` on the host and complete the subscription
@@ -95,10 +100,26 @@ With `--api-keys`, `ANTHROPIC_API_KEY` can be used instead.
 `OPENAI_API_KEY` field by default, including when the file also contains OAuth
 tokens. Codex runs with file-based credential storage and a trusted
 `/workspace/project` directory. Its writable auth, sessions, and config persist
-in the `codex-config` volume at `/home/dev/.codex`; the host's Codex config and
-other state are not mounted. A host login is copied on startup; if none is
-available, an existing sandbox login is retained. Token refreshes inside the
-sandbox stay in that volume and are not written back to the host.
+in the `codex-config` volume at `/home/dev/.codex`. A host login is copied on
+startup; if none is available, an existing sandbox login is retained. Token
+refreshes inside the sandbox stay in that volume and are not written back to
+the host.
+
+Each `--codex` launch also copies setup from `$CODEX_HOME` (default `~/.codex`):
+top-level TOML files (including `config.toml` and named profiles), `AGENTS.md`,
+`AGENTS.override.md`, `instructions.md`, and the `agents`, `skills`, `rules`, and
+`prompts` directories. Personal skills from `~/.agents/skills` are copied to
+the same location under the container user's home. Skill symlinks are
+dereferenced so their contents are available inside the sandbox.
+
+Host setup overwrites matching sandbox files on each launch; files that exist
+only in the sandbox are retained. Host sessions, history, logs, and caches are
+not copied. The copies are owned by the container user, and changes stay inside
+the sandbox. Playwright MCP registration happens after copying setup. API-key
+fields and literal provider `experimental_bearer_token` values in configuration
+require `--api-keys`; they are also stripped from retained sandbox configuration
+on runs without that option. Custom MCP executables and absolute paths in copied
+configuration must be available inside the container.
 
 If your host login is stored only in an OS keyring, create a file-based login
 first (see [Codex authentication](https://learn.chatgpt.com/docs/auth)):
@@ -255,7 +276,7 @@ Options:
                   instead of an interactive session
   --opencode      Run opencode instead of Claude Code (same image; the agent
                   is selected at runtime, not baked into one)
-  --codex         Run Codex using your host ChatGPT login
+  --codex         Run Codex using your host ChatGPT login and setup
   --api-keys      Also forward stored API keys and ANTHROPIC_API_KEY /
                   OPENAI_API_KEY (disabled by default)
   --port <port>   (--opencode only) Point opencode at an OpenAI-compatible

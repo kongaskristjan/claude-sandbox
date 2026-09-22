@@ -21,7 +21,7 @@ usage() {
     echo "                  instead of an interactive session"
     echo "  --opencode      Run opencode instead of Claude Code (same image; the"
     echo "                  agent is selected at runtime, not baked into one)"
-    echo "  --codex         Run Codex using your host ChatGPT login"
+    echo "  --codex         Run Codex using your host ChatGPT login and setup"
     echo "  --api-keys      Also forward stored API keys and ANTHROPIC_API_KEY /"
     echo "                  OPENAI_API_KEY (disabled by default)"
     echo "  --port <port>   (--opencode only) Point opencode at an OpenAI-compatible"
@@ -127,6 +127,8 @@ export CLAUDE_CONFIG_FILE="$AUTH_DIR/claude.json"
 export OPENCODE_AUTH_FILE="$AUTH_DIR/opencode-auth.json"
 export OPENCODE_CONFIG_FILE="$AUTH_DIR/opencode.json"
 export CODEX_AUTH_FILE="$AUTH_DIR/codex-auth.json"
+export CODEX_SETUP_DIR="$AUTH_DIR/codex-setup"
+mkdir -m 700 "$CODEX_SETUP_DIR"
 export SANDBOX_API_KEYS="$API_KEYS"
 export SANDBOX_ANTHROPIC_API_KEY=""
 export SANDBOX_OPENAI_API_KEY=""
@@ -146,6 +148,11 @@ stage_auth() {
 
 if [ "$CODEX" = true ]; then
     stage_auth codex "${CODEX_HOME:-$HOME/.codex}/auth.json" "$CODEX_AUTH_FILE"
+    stage_auth codex-setup "${CODEX_HOME:-$HOME/.codex}" "$CODEX_SETUP_DIR/codex"
+    if [ -d "$HOME/.agents/skills" ]; then
+        mkdir -p "$CODEX_SETUP_DIR/agents"
+        cp -RLp "$HOME/.agents/skills" "$CODEX_SETUP_DIR/agents/skills"
+    fi
     if [ ! -s "$CODEX_AUTH_FILE" ] && [ -z "$SANDBOX_OPENAI_API_KEY" ]; then
         echo "Warning: no host Codex ChatGPT login found; using any existing sandbox login."
         echo "To forward a host login, run: codex -c 'cli_auth_credentials_store=\"file\"' login"
