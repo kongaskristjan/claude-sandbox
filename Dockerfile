@@ -21,7 +21,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 # Only chrome-headless-shell: full Chrome-for-Testing SIGTRAPs under this
 # sandbox's security profile. The global config's browserName "chromium" (no
 # channel) makes headless launches use the shell.
-# The skill goes to ~/.agents/skills (opencode) and a local plugin loaded via
+# The skill goes to ~/.agents/skills (opencode, Codex) and a local plugin via
 # CLAUDE_CODE_PLUGIN_DIRS (Claude Code; ~/.claude/skills is a read-only mount).
 # The browser is baked into /opt/playwright-seed because the named volume at
 # PLAYWRIGHT_BROWSERS_PATH masks image content; entrypoint.sh syncs it in.
@@ -68,6 +68,11 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 RUN curl -fsSL https://opencode.ai/install | bash \
     && cp /root/.opencode/bin/opencode /usr/local/bin/opencode
 
+# Codex is selected at runtime, just like Claude Code and opencode.
+ARG CODEX_CACHE_BUST=0
+RUN npm install -g @openai/codex
+
+COPY prepare-auth.py /usr/local/lib/claude-sandbox/prepare-auth.py
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

@@ -6,9 +6,8 @@ set -e
 # We use ACLs to ensure both root (=host user) and dev can read/write
 # all project files.
 
-# Which agent this run launches (claude by default; opencode when the wrapper
-# passed SANDBOX_AGENT=opencode). Lets the steps below skip the Claude-only
-# auth/trust handling without a separate image.
+# Which agent this run launches (claude, opencode, or codex). Skip the
+# Claude-only auth/trust handling without a separate image.
 AGENT="${SANDBOX_AGENT:-claude}"
 
 if [ -d /workspace/project ]; then
@@ -77,8 +76,60 @@ fi
 # Remove profiles left by the Playwright MCP older images used.
 rm -rf /opt/playwright-browsers/mcp-* 2>/dev/null || true
 
-# Copy host auth files so dev user can use the existing credentials
-if [ "$AGENT" = "opencode" ]; then
+# Copy host auth files so dev user can use the existing credentials.
+if [ "$AGENT" = "codex" ]; then
+    export CODEX_HOME=/home/dev/.codex
+    mkdir -p "$CODEX_HOME"
+    # Overlay host setup on the writable volume before login and MCP setup.
+    # Missing host files leave sandbox-created config and sessions intact.
+    if [ -d /tmp/host-codex-setup/codex ]; then
+        cp -R /tmp/host-codex-setup/codex/. "$CODEX_HOME/"
+    fi
+    if [ -d /tmp/host-codex-setup/agents ]; then
+        mkdir -p /home/dev/.agents
+        cp -R /tmp/host-codex-setup/agents/. /home/dev/.agents/
+        chown -R dev:dev /home/dev/.agents
+    fi
+    # Remove API keys retained in config by earlier --api-keys runs too.
+    while IFS= read -r -d '' config; do
+        python3 /usr/local/lib/claude-sandbox/prepare-auth.py codex-config \
+            "$config" "$config.tmp" "${SANDBOX_API_KEYS:-false}"
+        mv "$config.tmp" "$config"
+    done < <(find "$CODEX_HOME" -maxdepth 1 -type f -name '*.toml' -print0)
+    if [ -d "$CODEX_HOME/agents" ]; then
+        while IFS= read -r -d '' config; do
+            python3 /usr/local/lib/claude-sandbox/prepare-auth.py codex-config \
+                "$config" "$config.tmp" "${SANDBOX_API_KEYS:-false}"
+            mv "$config.tmp" "$config"
+        done < <(find "$CODEX_HOME/agents" -type f -name '*.toml' -print0)
+    fi
+    chown -R dev:dev "$CODEX_HOME"
+    chmod 700 "$CODEX_HOME"
+    # Drop the Playwright MCP older images registered in the persisted config.
+    if grep -qs 'command = "playwright-mcp"' "$CODEX_HOME/config.toml"; then
+        gosu dev env HOME=/home/dev CODEX_HOME="$CODEX_HOME" codex mcp remove playwright >/dev/null 2>&1 || true
+    fi
+    if [ -s /tmp/host-codex-auth.json ]; then
+        cp /tmp/host-codex-auth.json "$CODEX_HOME/auth.json"
+    fi
+    # A missing host login must not erase a login created in the sandbox.
+    # Strip API billing credentials left by a previous --api-keys run.
+    if [ -f "$CODEX_HOME/auth.json" ]; then
+        python3 /usr/local/lib/claude-sandbox/prepare-auth.py codex \
+            "$CODEX_HOME/auth.json" "$CODEX_HOME/auth.json.tmp" "${SANDBOX_API_KEYS:-false}"
+        if [ -s "$CODEX_HOME/auth.json.tmp" ]; then
+            mv "$CODEX_HOME/auth.json.tmp" "$CODEX_HOME/auth.json"
+            chown dev:dev "$CODEX_HOME/auth.json"
+            chmod 600 "$CODEX_HOME/auth.json"
+        else
+            rm -f "$CODEX_HOME/auth.json" "$CODEX_HOME/auth.json.tmp"
+        fi
+    fi
+    if [ "${SANDBOX_API_KEYS:-false}" = true ] && [ -n "${OPENAI_API_KEY:-}" ]; then
+        printf '%s' "$OPENAI_API_KEY" | gosu dev env HOME=/home/dev codex \
+            -c 'cli_auth_credentials_store="file"' login --with-api-key
+    fi
+elif [ "$AGENT" = "opencode" ]; then
     # opencode keeps auth.json under ~/.local/share/opencode and opencode.json
     # under ~/.config/opencode; the host copies arrive at these /tmp paths.
     mkdir -p /home/dev/.local/share/opencode /home/dev/.config/opencode

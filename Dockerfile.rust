@@ -11,17 +11,6 @@ RUN useradd -m -s /bin/bash -G root,audio dev
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs
 
-# Install Claude Code as native binary (has built-in audio for voice mode)
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && cp /root/.local/share/claude/versions/* /usr/local/bin/claude
-
-# Install opencode alongside Claude Code. It is a standalone native binary,
-# copied to /usr/local/bin so the non-root dev user can run it. The agent is
-# chosen at runtime (SANDBOX_AGENT), not by which image is built, so it is
-# installed in every image.
-RUN curl -fsSL https://opencode.ai/install | bash \
-    && cp /root/.opencode/bin/opencode /usr/local/bin/opencode
-
 # Rust toolchain, installed into dev's home rather than /usr/local so the
 # sandbox user owns it and can `rustup update` / `cargo install` at runtime.
 # Only the cache subdirectories of CARGO_HOME are named volumes (registry, git,
@@ -47,7 +36,7 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
 # Only chrome-headless-shell: full Chrome-for-Testing SIGTRAPs under this
 # sandbox's security profile. The global config's browserName "chromium" (no
 # channel) makes headless launches use the shell.
-# The skill goes to ~/.agents/skills (opencode) and a local plugin loaded via
+# The skill goes to ~/.agents/skills (opencode, Codex) and a local plugin via
 # CLAUDE_CODE_PLUGIN_DIRS (Claude Code; ~/.claude/skills is a read-only mount).
 # The browser is baked into /opt/playwright-seed because the named volume at
 # PLAYWRIGHT_BROWSERS_PATH masks image content; entrypoint.sh syncs it in.
@@ -77,6 +66,23 @@ RUN npm install -g @playwright/cli@${PLAYWRIGHT_CLI_VERSION} \
     && chmod -R a+rX /opt/claude-plugins \
     && chown -R dev:dev /home/dev/.agents /home/dev/.playwright
 
+# Install Claude Code as native binary (has built-in audio for voice mode)
+ARG CLAUDE_CACHE_BUST=0
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && cp /root/.local/share/claude/versions/* /usr/local/bin/claude
+
+# Install opencode alongside Claude Code. It is a standalone native binary,
+# copied to /usr/local/bin so the non-root dev user can run it. The agent is
+# chosen at runtime (SANDBOX_AGENT), not by which image is built, so it is
+# installed in every image.
+RUN curl -fsSL https://opencode.ai/install | bash \
+    && cp /root/.opencode/bin/opencode /usr/local/bin/opencode
+
+# Codex is selected at runtime, just like Claude Code and opencode.
+ARG CODEX_CACHE_BUST=0
+RUN npm install -g @openai/codex
+
+COPY prepare-auth.py /usr/local/lib/claude-sandbox/prepare-auth.py
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

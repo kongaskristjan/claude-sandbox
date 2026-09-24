@@ -1,13 +1,13 @@
 # claude-sandbox
 
-A Docker-based sandbox for running Claude Code with `--dangerously-skip-permissions` safely. Supports CPU-only, NVIDIA GPU, and Rust workflows.
+A Docker-based sandbox for running Claude Code, OpenCode, or Codex with automatic approvals inside the container. Supports CPU-only, NVIDIA GPU, and Rust workflows.
 
 ## What it does
 
-- Runs Claude Code inside a Docker container so it can't affect your host system
+- Runs Claude Code, OpenCode, or Codex inside a Docker container
 - Ships a lightweight CPU image by default; opt in to a CUDA image with `--gpu` for deep learning workloads, or a Rust image with `--rust`
 - Bind-mounts your project directory so you can edit files from both host (VS Code) and container (Claude Code)
-- Forwards your Claude subscription credentials (no re-login needed)
+- Forwards your selected agent's subscription login (including Codex ChatGPT login); API keys require `--api-keys`
 - Shares your personal skills (`~/.claude/skills`), so they work inside and outside the sandbox
 - Enables voice mode (`/voice`) via PulseAudio/PipeWire passthrough
 - Auto-rebuilds the container image on each run
@@ -17,8 +17,13 @@ A Docker-based sandbox for running Claude Code with `--dangerously-skip-permissi
 
 - Linux with Docker installed (rootless or rootful), or macOS with Docker Desktop
 - NVIDIA GPU with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (only required when using `--gpu`)
-- Claude Code installed on the host and logged in (for subscription auth), or an `ANTHROPIC_API_KEY`
+- Python 3 on the host (with `tomli` installed on Python older than 3.11 for copying Codex TOML configuration)
+- Your chosen agent logged in on the host, or an API key with explicit `--api-keys` opt-in
 - PulseAudio or PipeWire (for voice mode)
+
+On Python older than 3.11, install the Codex configuration parser with
+`python3 -m pip install tomli`. Python 3.11+ uses the built-in `tomllib` module
+and needs no additional package.
 
 ## Setup
 
@@ -47,6 +52,12 @@ The first run will build the Docker image. The default CPU image is small; `--gp
 # Run opencode instead of Claude Code (same image, chosen at runtime)
 ~/claude-sandbox/claude-sandbox --opencode ~/projects/my-project
 
+# Run Codex with your host ChatGPT login and setup (also works with --rust or --gpu)
+~/claude-sandbox/claude-sandbox --codex ~/projects/my-project
+
+# Explicitly opt in to API-key forwarding
+~/claude-sandbox/claude-sandbox --codex --api-keys ~/projects/my-project
+
 # Point opencode at an OpenAI-compatible server on the host (e.g. a local
 # 'openai serve' on port 8080) instead of a hosted provider
 ~/claude-sandbox/claude-sandbox --opencode --port 8080 ~/projects/my-project
@@ -63,33 +74,71 @@ The first run will build the Docker image. The default CPU image is small; `--gp
 
 The wrapper auto-detects whether Docker is rootless or rootful and prints the detected mode at startup. Use `--host-network` when you need the container to access services on localhost (e.g., a dev server on port 8080).
 
-Claude Code starts with `--dangerously-skip-permissions` inside the container (opencode starts with the equivalent `--auto`). Your project files are mounted at `/workspace/project`.
+Claude Code starts with `--dangerously-skip-permissions`, opencode with `--auto`, and Codex with `--dangerously-bypass-approvals-and-sandbox` inside the container. Docker provides the isolation boundary. Your project files are mounted at `/workspace/project`.
 
 ### Authentication
 
-The wrapper supports two auth methods:
+Subscription/OAuth logins transfer by default. **API keys do not**: exporting
+`ANTHROPIC_API_KEY` or `OPENAI_API_KEY` alone does not forward them. Pass
+`--api-keys` to forward those variables and stored API-key credentials. This
+opt-in applies to all three agents, including Claude's legacy `primaryApiKey`.
 
-1. **Claude subscription (default)**: If you've logged into Claude Code on the host (`claude` then follow OAuth flow), credentials are automatically forwarded to the container.
-2. **API key**: Export `ANTHROPIC_API_KEY` before running.
+The wrapper stages only the selected agent's auth/config in private temporary
+storage (auth and config files use `0600`) and mounts those copies read-only.
+It filters API-key auth entries and API-key fields in JSON and Codex TOML config
+before Docker can access them, then removes the temporary files on exit.
+Host auth/config files are not modified.
+Use the wrapper rather than invoking Compose directly so this staging happens.
 
-On macOS, Claude Code stores subscription credentials in the login Keychain
-rather than `~/.claude/.credentials.json`, so there is no file to forward. The
-wrapper exports the Keychain item (`Claude Code-credentials`) to a private
-`0600` temp file for the life of the run, mounts that, and deletes it on exit.
-Expect a Keychain prompt on first use.
+**Claude Code** (default): Run `claude` on the host and complete the subscription
+login. On macOS, the wrapper exports the `Claude Code-credentials` login Keychain
+item to its private temporary directory; expect a Keychain prompt on first use.
+With `--api-keys`, `ANTHROPIC_API_KEY` can be used instead.
 
-**opencode** (`--opencode`) authenticates differently from Claude Code:
+**Codex** (`--codex`): The wrapper forwards the ChatGPT login tokens from
+`$CODEX_HOME/auth.json` (default `~/.codex/auth.json`). It excludes the
+`OPENAI_API_KEY` field by default, including when the file also contains OAuth
+tokens. Codex runs with file-based credential storage and a trusted
+`/workspace/project` directory. Its writable auth, sessions, and config persist
+in the `codex-config` volume at `/home/dev/.codex`. A host login is copied on
+startup; if none is available, an existing sandbox login is retained. Token
+refreshes inside the sandbox stay in that volume and are not written back to
+the host.
 
-- **API key**: Export `ANTHROPIC_API_KEY` before running — opencode honors it
-  for the Anthropic provider.
-- **Forwarded login**: If you've logged into opencode on the host, the wrapper
-  forwards `~/.local/share/opencode/auth.json` (read-only) into the container.
+Each `--codex` launch also copies setup from `$CODEX_HOME` (default `~/.codex`):
+top-level TOML files (including `config.toml` and named profiles), `AGENTS.md`,
+`AGENTS.override.md`, `instructions.md`, and the `agents`, `skills`, `rules`, and
+`prompts` directories. Personal skills from `~/.agents/skills` are copied to
+the same location under the container user's home. Skill symlinks are
+dereferenced so their contents are available inside the sandbox.
 
-opencode's config lives at `~/.config/opencode/opencode.json` on the host and is
-forwarded the same way; its state (the running `auth.json`, `opencode.db`)
-persists across runs in the `opencode-data` named volume. Unlike Claude
-subscription auth, a missing opencode auth file is **not** fatal — opencode can
-also log in interactively inside the container.
+Host setup overwrites matching sandbox files on each launch; files that exist
+only in the sandbox are retained. Host sessions, history, logs, and caches are
+not copied. The copies are owned by the container user, and changes stay inside
+the sandbox. API-key
+fields and literal provider `experimental_bearer_token` values in configuration
+require `--api-keys`; they are also stripped from retained sandbox configuration
+on runs without that option. Custom MCP executables and absolute paths in copied
+configuration must be available inside the container.
+
+If your host login is stored only in an OS keyring, create a file-based login
+first (see [Codex authentication](https://learn.chatgpt.com/docs/auth)):
+
+```bash
+codex -c 'cli_auth_credentials_store="file"' login
+claude-sandbox --codex
+```
+
+A missing Codex login is not fatal: you can also log in inside the container.
+With `--api-keys`, a forwarded `OPENAI_API_KEY` takes precedence over the copied
+ChatGPT login.
+
+**opencode** (`--opencode`): OAuth entries from
+`~/.local/share/opencode/auth.json` are forwarded. API-key entries require
+`--api-keys`, as do `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`. Its JSON config at
+`~/.config/opencode/opencode.json` is forwarded with API-key fields removed by
+default. State persists in the `opencode-data` volume. A missing host login is
+not fatal; opencode can log in interactively inside the container.
 
 **`--port <port>`** points opencode at an OpenAI-compatible server running on the
 host (for example a local `openai serve`) instead of a hosted provider. The
@@ -122,7 +171,7 @@ when a GPU is actually passed through.
 ### Rust image
 
 `--rust` builds `Dockerfile.rust`: Ubuntu 24.04 with a rustup-managed stable
-toolchain (plus `rustfmt` and `clippy`), Node.js, Claude Code and Playwright
+toolchain (plus `rustfmt` and `clippy`), Node.js, all three agents and Playwright
 CLI — but no Python tooling and no CUDA. Common `-sys` crate build inputs
 (`pkg-config`, `libssl-dev`, `cmake`, `build-essential`) are present.
 
@@ -159,8 +208,9 @@ session but, like anything outside the cache volumes, don't survive it.
 [Playwright CLI](https://github.com/microsoft/playwright-cli) (`playwright-cli`)
 and a headless Chromium are pre-installed, so the agent can drive a browser via
 shell commands (`playwright-cli open <url>`, `snapshot`, `click e15`, …) with no
-setup. Its skill is pre-installed for both agents: as a local plugin for Claude
-Code (via `CLAUDE_CODE_PLUGIN_DIRS`) and in `~/.agents/skills` for opencode.
+setup. Its skill is pre-installed for all agents: as a local plugin for Claude
+Code (via `CLAUDE_CODE_PLUGIN_DIRS`) and in `~/.agents/skills` for opencode and
+Codex.
 
 - Only `chrome-headless-shell` is installed; full Chrome-for-Testing crashes
   under the container's security profile. `~/.playwright/cli.config.json` sets
@@ -195,7 +245,7 @@ Files are bind-mounted, so you can:
 ### Options
 
 ```
-Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents|--opencode] [--port <port>] [project-dir]
+Usage: claude-sandbox [--gpu|--rust] [--host-network] [--update] [--agents|--opencode|--codex] [--api-keys] [--port <port>] [project-dir]
 
 Options:
   --gpu           Use the CUDA image with NVIDIA GPU passthrough
@@ -204,12 +254,15 @@ Options:
                   CUDA) with persistent cargo registry and build caches
   --host-network  Use host networking (always enabled for rootless Docker,
                   opt-in for rootful Docker)
-  --update        Refresh the Claude Code binary in the image (other layers
+  --update        Refresh the agent binaries in the image (other layers
                   stay cached); future runs reuse the refreshed layer
   --agents        Launch the background-agents view ('claude agents')
                   instead of an interactive session
   --opencode      Run opencode instead of Claude Code (same image; the agent
                   is selected at runtime, not baked into one)
+  --codex         Run Codex using your host ChatGPT login and setup
+  --api-keys      Also forward stored API keys and ANTHROPIC_API_KEY /
+                  OPENAI_API_KEY (disabled by default)
   --port <port>   (--opencode only) Point opencode at an OpenAI-compatible
                   server running on the host at this port; auto-enables host
                   networking and auto-discovers the server's models
@@ -217,14 +270,15 @@ Options:
 Environment variables:
   CLAUDE_SANDBOX_MODE=rootless|rootful  Override Docker mode auto-detection
   CLAUDE_SANDBOX_NO_MPS=1               Don't start the CUDA MPS control daemon
-  ANTHROPIC_API_KEY=sk-ant-...          Use API key instead of subscription
+  ANTHROPIC_API_KEY=sk-ant-...          API key (requires --api-keys)
+  OPENAI_API_KEY=sk-...                API key (requires --api-keys)
+  CODEX_HOME                          Host Codex directory (default ~/.codex)
 ```
 
 `--update` writes a timestamp to `~/.cache/claude-sandbox/claude-update-stamp`
-(or under `$XDG_CACHE_HOME`) and passes it to the build as `CLAUDE_CACHE_BUST`,
-the build arg right before the Claude install layer. Only that layer and the
-entrypoint copy are rebuilt; apt, node, uv and the Playwright browser stay
-cached. Because the stamp persists and is passed on every run, later runs keep
+(or under `$XDG_CACHE_HOME`) and passes it to the build as `CLAUDE_CACHE_BUST`
+and `CODEX_CACHE_BUST`. The agent install layers and entrypoint copy are rebuilt;
+apt, node, uv, Rust, and the Playwright browser stay cached. Because the stamp persists and is passed on every run, later runs keep
 using the refreshed layer instead of matching the stale one.
 
 ## Security model
@@ -263,7 +317,8 @@ Every image:
 
 - Node.js 22
 - Claude Code (native binary with voice support)
-- opencode (native binary; run it instead of Claude Code with `--opencode`)
+- opencode (native binary; select with `--opencode`)
+- Codex (`@openai/codex`; select with `--codex`)
 - git, git-lfs, curl, wget, build-essential, cmake
 - [Playwright CLI](https://github.com/microsoft/playwright-cli) + headless Chromium and its OS deps
 
@@ -293,6 +348,8 @@ comes in as a dependency of the NodeSource `nodejs` package.
 ├── docker-compose.host-network.yml  # Optional overlay: host networking for rootful
 ├── entrypoint.sh               # Permission setup, auth forwarding, ALSA→PulseAudio routing, CUDA MPS
 ├── claude-sandbox              # Convenience wrapper script (auto-detects Docker mode)
+├── prepare-auth.py             # Host-side login staging and API-key filtering
+├── tests/test_sandbox.py        # Credential and launch regression checks
 └── README.md
 ```
 
@@ -309,3 +366,14 @@ RUN pip install torch torchvision --break-system-packages
 ### Disabling voice mode
 
 Remove the PulseAudio-related volumes and environment variables from `docker-compose.yml`, and the `sox`/`alsa`/`pulseaudio` packages from the Dockerfile.
+
+## Development checks
+
+```bash
+bash -n claude-sandbox entrypoint.sh
+python3 -B -m unittest discover -s tests -v
+```
+
+Tests use synthetic credentials and mocked container commands. Compose rendering
+is also checked when Docker Compose is installed; no Docker daemon or API calls
+are needed.
