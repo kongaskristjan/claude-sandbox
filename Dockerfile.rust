@@ -42,31 +42,40 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
         --default-toolchain stable --component rustfmt --component clippy \
     && chown -R dev:dev /home/dev/.rustup /home/dev/.cargo
 
-# Set up the Playwright MCP server + browser + OS deps.
-# @playwright/mcp bundles its own (often alpha) playwright-core that pins a
-# specific Chrome-for-Testing revision, so the server, its OS deps, and the
-# browser must all come from the same package or the revisions drift apart
-# ("browser not installed" at runtime). Install the MCP globally and drive
-# install-deps and install-browser through it, making PLAYWRIGHT_MCP_VERSION
-# the single pin — this also lets entrypoint.sh register the server as the
-# global `playwright-mcp` bin, so MCP startup needs no npm registry access.
-#
-# PLAYWRIGHT_BROWSERS_PATH is a named volume (see docker-compose.yml). Docker
-# copies image content into a named volume only when the volume is first
-# created, so a browser baked directly into that path would be masked by any
-# pre-existing volume after a rebuild. Instead, bake the browser into
-# /opt/playwright-seed (outside the volume); entrypoint.sh syncs missing
-# revisions into the volume on every start.
+# Playwright CLI + browser + OS deps, all from the playwright-core bundled in
+# @playwright/cli so revisions can't drift; PLAYWRIGHT_CLI_VERSION is the pin.
+# Only chrome-headless-shell: full Chrome-for-Testing SIGTRAPs under this
+# sandbox's security profile. The global config's browserName "chromium" (no
+# channel) makes headless launches use the shell.
+# The skill goes to ~/.agents/skills (opencode) and a local plugin loaded via
+# CLAUDE_CODE_PLUGIN_DIRS (Claude Code; ~/.claude/skills is a read-only mount).
+# The browser is baked into /opt/playwright-seed because the named volume at
+# PLAYWRIGHT_BROWSERS_PATH masks image content; entrypoint.sh syncs it in.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
-    PLAYWRIGHT_MCP_VERSION=0.0.75
-RUN npm install -g @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} \
+    PLAYWRIGHT_CLI_VERSION=0.1.21 \
+    CLAUDE_CODE_PLUGIN_DIRS=/opt/claude-plugins/playwright-cli \
+    NO_UPDATE_NOTIFIER=1
+RUN npm install -g @playwright/cli@${PLAYWRIGHT_CLI_VERSION} \
     && apt-get update \
-    && node "$(npm root -g)/@playwright/mcp/node_modules/playwright-core/cli.js" \
+    && node "$(npm root -g)/@playwright/cli/node_modules/playwright-core/cli.js" \
         install-deps chromium \
     && rm -rf /var/lib/apt/lists/* \
     && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-seed \
-        playwright-mcp install-browser chrome-for-testing \
-    && chmod -R a+rX /opt/playwright-seed
+        playwright-cli install-browser --only-shell chromium \
+    && chmod -R a+rX /opt/playwright-seed \
+    && skill="$(npm root -g)/@playwright/cli/skills/playwright-cli" \
+    && mkdir -p /opt/claude-plugins/playwright-cli/.claude-plugin \
+        /opt/claude-plugins/playwright-cli/skills /home/dev/.agents/skills \
+        /home/dev/.playwright \
+    && printf '%s\n' '{"name": "playwright-cli", "version": "'"$PLAYWRIGHT_CLI_VERSION"'",' \
+        ' "description": "Browser automation with playwright-cli"}' \
+        > /opt/claude-plugins/playwright-cli/.claude-plugin/plugin.json \
+    && cp -r "$skill" /opt/claude-plugins/playwright-cli/skills/ \
+    && cp -r "$skill" /home/dev/.agents/skills/ \
+    && echo '{"browser": {"browserName": "chromium"}}' \
+        > /home/dev/.playwright/cli.config.json \
+    && chmod -R a+rX /opt/claude-plugins \
+    && chown -R dev:dev /home/dev/.agents /home/dev/.playwright
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

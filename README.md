@@ -122,8 +122,8 @@ when a GPU is actually passed through.
 ### Rust image
 
 `--rust` builds `Dockerfile.rust`: Ubuntu 24.04 with a rustup-managed stable
-toolchain (plus `rustfmt` and `clippy`), Node.js, Claude Code and the Playwright
-MCP — but no Python tooling and no CUDA. Common `-sys` crate build inputs
+toolchain (plus `rustfmt` and `clippy`), Node.js, Claude Code and Playwright
+CLI — but no Python tooling and no CUDA. Common `-sys` crate build inputs
 (`pkg-config`, `libssl-dev`, `cmake`, `build-essential`) are present.
 
 Cargo's caches are persistent named volumes, the same way the uv cache is, so
@@ -154,40 +154,23 @@ The toolchain itself lives in `$RUSTUP_HOME` (`/home/dev/.rustup`) and
 what an old volume holds. `rustup update` and `cargo install` work inside a
 session but, like anything outside the cache volumes, don't survive it.
 
-### Playwright MCP (browser automation)
+### Playwright CLI (browser automation)
 
-A headless Chromium build and its OS dependencies are pre-baked, and the
-[Playwright MCP server](https://github.com/microsoft/playwright-mcp) is
-**auto-registered on container start** — so browser automation works with no
-setup. The entrypoint registers it (user scope) pinned to the browser revision
-baked into the image, with the flags this sandbox needs:
+[Playwright CLI](https://github.com/microsoft/playwright-cli) (`playwright-cli`)
+and a headless Chromium are pre-installed, so the agent can drive a browser via
+shell commands (`playwright-cli open <url>`, `snapshot`, `click e15`, …) with no
+setup. Its skill is pre-installed for both agents: as a local plugin for Claude
+Code (via `CLAUDE_CODE_PLUGIN_DIRS`) and in `~/.agents/skills` for opencode.
 
-```bash
-playwright-mcp --headless --browser chromium --isolated
-```
-
-- `--browser chromium` (not the default Chrome channel) — no system Google Chrome
-  is installed, so the default channel fails; this targets the bundled Chromium.
-- `--headless` — there is no display in the container.
-- `--isolated` — keep the Chrome profile in memory. Without it, the MCP persists
-  a profile per client cwd (so one per worktree) into the browsers volume, which
-  grows without bound; the entrypoint prunes profiles older than a week.
-
-Set `CLAUDE_SANDBOX_NO_PLAYWRIGHT=1` to skip registration (e.g. if you don't want
-the server spawned for sessions that never touch a browser).
-
-Notes:
-- `@playwright/mcp` bundles its own playwright-core pinned to a specific browser
-  revision. The image installs `@playwright/mcp@$PLAYWRIGHT_MCP_VERSION` globally
-  and drives the browser install through it, avoiding the "browser not installed"
-  revision mismatch you get from a stable `playwright install`. That one version
-  pin covers the server, its OS deps, and the browser.
-- `/opt/playwright-browsers` is a **persistent named volume**, so it masks
-  whatever the image has at that path. The browser is therefore baked into
-  `/opt/playwright-seed` inside the image, and the entrypoint copies any missing
-  revision into the volume at start. To upgrade, bump `PLAYWRIGHT_MCP_VERSION`
-  in the Dockerfile and rebuild — the next container start syncs the new
-  revision in, even on machines whose volume already exists.
+- Only `chrome-headless-shell` is installed; full Chrome-for-Testing crashes
+  under the container's security profile. `~/.playwright/cli.config.json` sets
+  `"browserName": "chromium"` so the CLI uses it instead of the Chrome channel.
+- Output (snapshots, screenshots) goes to `.playwright-cli/` in the current
+  directory; add it to the project's `.gitignore`.
+- `/opt/playwright-browsers` is a persistent named volume, so the browser is
+  baked into `/opt/playwright-seed` and the entrypoint copies missing revisions
+  in at start. To upgrade, bump `PLAYWRIGHT_CLI_VERSION` in the Dockerfiles and
+  rebuild.
 
 ### Personal skills
 
@@ -282,7 +265,7 @@ Every image:
 - Claude Code (native binary with voice support)
 - opencode (native binary; run it instead of Claude Code with `--opencode`)
 - git, git-lfs, curl, wget, build-essential, cmake
-- Headless Chromium + OS deps for the [Playwright MCP server](https://github.com/microsoft/playwright-mcp)
+- [Playwright CLI](https://github.com/microsoft/playwright-cli) + headless Chromium and its OS deps
 
 Per image:
 

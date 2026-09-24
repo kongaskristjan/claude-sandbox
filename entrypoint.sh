@@ -52,8 +52,9 @@ fi
 # The Playwright browsers dir is a named volume, which masks whatever the
 # image has at that path once the volume exists. Sync in any browser revision
 # baked into the image (under /opt/playwright-seed) that the volume doesn't
-# have yet, so a PLAYWRIGHT_MCP_VERSION bump reaches existing volumes on the
-# next start. Runtime installs by the MCP still land in the volume and persist.
+# have yet, so a PLAYWRIGHT_CLI_VERSION bump reaches existing volumes on the
+# next start. Runtime installs by playwright-cli still land in the volume and
+# persist.
 mkdir -p /opt/playwright-browsers
 chown dev:dev /opt/playwright-browsers 2>/dev/null || true
 if [ -d /opt/playwright-seed ]; then
@@ -73,11 +74,8 @@ if [ -d /opt/playwright-seed ]; then
         fi
     done
 fi
-# Without --isolated, the MCP persists a Chrome profile per client cwd into the
-# browsers volume (playwright-core puts profiles under PLAYWRIGHT_BROWSERS_PATH)
-# and nothing ever removes them — with one worktree per task that grew without
-# bound. New sessions run --isolated; prune what older sessions left behind.
-find /opt/playwright-browsers -maxdepth 1 -name 'mcp-*' -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+# Remove profiles left by the Playwright MCP older images used.
+rm -rf /opt/playwright-browsers/mcp-* 2>/dev/null || true
 
 # Copy host auth files so dev user can use the existing credentials
 if [ "$AGENT" = "opencode" ]; then
@@ -210,46 +208,6 @@ TRUSTEOF
 fi
 chown dev:dev /home/dev/.claude.json 2>/dev/null || true
 chmod 600 /home/dev/.claude.json 2>/dev/null || true
-fi
-
-# Register the Playwright MCP server, pinned to the browser revision baked into
-# the image, with the flags this sandbox needs (--browser chromium, since no
-# system Chrome exists; --headless, since there is no display; --isolated, so
-# the Chrome profile stays in memory instead of accreting one per client cwd
-# inside the browsers volume). This way the
-# agent gets a working browser without knowing any sandbox internals. The
-# server is the image's global `playwright-mcp` bin rather than npx, so its
-# version always matches the baked browser and startup needs no npm registry
-# access. Done here, after the host config copy, because that copy would
-# clobber a build-time registration. remove-then-add keeps it idempotent
-# across restarts. Set CLAUDE_SANDBOX_NO_PLAYWRIGHT=1 to skip.
-#
-# Full Chrome-for-Testing SIGTRAPs at startup (a crashpad-init
-# CHECK/IMMEDIATE_CRASH) under this sandbox's no-new-privileges +
-# default-seccomp + dropped-caps profile, so point the MCP at the stripped
-# chrome-headless-shell build (same revision, installed alongside it), which
-# does not run that path. The revision dir tracks PLAYWRIGHT_MCP_VERSION, so
-# glob at runtime and take the newest instead of hardcoding. If the shell is
-# not present, fall back to the default chromium (no --executable-path).
-if [ -z "$CLAUDE_SANDBOX_NO_PLAYWRIGHT" ] && command -v playwright-mcp >/dev/null 2>&1; then
-    SHELL_BIN="$(find /opt/playwright-browsers -maxdepth 3 -type f \
-        -path '*chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell' \
-        2>/dev/null | sort -V | tail -1)"
-    SHELL_ARGS=()
-    if [ -n "$SHELL_BIN" ] && [ -x "$SHELL_BIN" ]; then
-        SHELL_ARGS=(--executable-path "$SHELL_BIN")
-    fi
-    if [ "$AGENT" = "opencode" ]; then
-        gosu dev env HOME=/home/dev opencode mcp remove playwright 2>/dev/null || true
-        gosu dev env HOME=/home/dev opencode mcp add playwright -- \
-            playwright-mcp --headless --browser chromium --isolated "${SHELL_ARGS[@]}" \
-            >/dev/null 2>&1 || true
-    else
-        gosu dev env HOME=/home/dev claude mcp remove playwright -s user 2>/dev/null || true
-        gosu dev env HOME=/home/dev claude mcp add playwright -s user -- \
-            playwright-mcp --headless --browser chromium --isolated "${SHELL_ARGS[@]}" \
-            >/dev/null 2>&1 || true
-    fi
 fi
 
 # Start the CUDA MPS control daemon, so several processes sharing the GPU run
