@@ -13,7 +13,7 @@
 - Use sub-agents for implementation, review and testing.
   - Only use your general agent. Don't use the sub-agents specified in this project.
 - High level planning and question answering is generally better done in the main agent.
-- Individual sub-agents should implement, verify results and commit in a worktree. It should then merge back to the branch that we're on currently. Use `scripts/create_worktree.sh`, as this adapts ports for testing.
+- Individual sub-agents should implement, verify results and commit in a worktree. It should then merge back to the branch that we're on currently.
 - Consider doing simple tasks with a less expensive model (eg. Fable (main agent) -> Opus (sub-agent)). Don't go below Opus or gpt sol models.
 
 ## Verification
