@@ -316,6 +316,8 @@ echo '{"claudeAiOauth":{"accessToken":"keychain-oauth"},"primaryApiKey":"secret"
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose is not installed")
     def test_rendered_compose_all_images_and_modes(self):
         docker = shutil.which("docker")
+        # The fake HOME hides the compose CLI plugin; keep the real docker config.
+        docker_config = os.environ.get("DOCKER_CONFIG", str(Path.home() / ".docker"))
         for mode in ("rootful", "rootless"):
             self.env["CLAUDE_SANDBOX_MODE"] = mode
             for image in ((), ("--gpu",), ("--rust",)):
@@ -323,7 +325,8 @@ echo '{"claudeAiOauth":{"accessToken":"keychain-oauth"},"primaryApiKey":"secret"
                     data = self.launch("--codex", *image)
                     args = data["args"][:data["args"].index("run")]
                     result = subprocess.run([docker, *args, "config", "--format", "json"],
-                                            env=data["env"], capture_output=True, text=True)
+                                            env={**data["env"], "DOCKER_CONFIG": docker_config},
+                                            capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     service = json.loads(result.stdout)["services"]["claude-dev"]
                     self.assertEqual(service["environment"]["OPENAI_API_KEY"], "")
