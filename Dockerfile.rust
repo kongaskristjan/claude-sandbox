@@ -1,15 +1,16 @@
 FROM ubuntu:24.04
 
-RUN apt-get update && apt-get install -y \
-    git git-lfs curl wget sudo gosu acl \
-    build-essential cmake pkg-config libssl-dev \
-    sox libsox-fmt-all alsa-utils pulseaudio-utils libasound2-plugins \
-    && rm -rf /var/lib/apt/lists/*
+# Install steps live in docker/. Each script is copied right before its RUN so
+# editing one only rebuilds from that layer on.
+ARG SCRIPTS=/usr/local/lib/claude-sandbox/build
+
+COPY docker/apt-base.sh $SCRIPTS/
+RUN bash $SCRIPTS/apt-base.sh pkg-config libssl-dev
 
 RUN useradd -m -s /bin/bash -G root,audio dev
 
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs
+COPY docker/node.sh $SCRIPTS/
+RUN bash $SCRIPTS/node.sh
 
 # Rust toolchain, installed into dev's home rather than /usr/local so the
 # sandbox user owns it and can `rustup update` / `cargo install` at runtime.
@@ -31,54 +32,22 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
         --default-toolchain stable --component rustfmt --component clippy \
     && chown -R dev:dev /home/dev/.rustup /home/dev/.cargo
 
-# Playwright CLI + browser + OS deps, all from the playwright-core bundled in
-# @playwright/cli so revisions can't drift; PLAYWRIGHT_CLI_VERSION is the pin.
-# Only chrome-headless-shell: full Chrome-for-Testing SIGTRAPs under this
-# sandbox's security profile. The global config's browserName "chromium" (no
-# channel) makes headless launches use the shell.
-# The skill goes to ~/.agents/skills (opencode, Codex) and a local plugin via
-# CLAUDE_CODE_PLUGIN_DIRS (Claude Code; ~/.claude/skills is a read-only mount).
-# The browser is baked into /opt/playwright-seed because the named volume at
-# PLAYWRIGHT_BROWSERS_PATH masks image content; entrypoint.sh syncs it in.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
     PLAYWRIGHT_CLI_VERSION=0.1.21 \
     CLAUDE_CODE_PLUGIN_DIRS=/opt/claude-plugins/playwright-cli \
     NO_UPDATE_NOTIFIER=1
-RUN npm install -g @playwright/cli@${PLAYWRIGHT_CLI_VERSION} \
-    && apt-get update \
-    && node "$(npm root -g)/@playwright/cli/node_modules/playwright-core/cli.js" \
-        install-deps chromium \
-    && rm -rf /var/lib/apt/lists/* \
-    && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-seed \
-        playwright-cli install-browser --only-shell chromium \
-    && chmod -R a+rX /opt/playwright-seed \
-    && skill="$(npm root -g)/@playwright/cli/skills/playwright-cli" \
-    && mkdir -p /opt/claude-plugins/playwright-cli/.claude-plugin \
-        /opt/claude-plugins/playwright-cli/skills /home/dev/.agents/skills \
-        /home/dev/.playwright \
-    && printf '%s\n' '{"name": "playwright-cli", "version": "'"$PLAYWRIGHT_CLI_VERSION"'",' \
-        ' "description": "Browser automation with playwright-cli"}' \
-        > /opt/claude-plugins/playwright-cli/.claude-plugin/plugin.json \
-    && cp -r "$skill" /opt/claude-plugins/playwright-cli/skills/ \
-    && cp -r "$skill" /home/dev/.agents/skills/ \
-    && echo '{"browser": {"browserName": "chromium"}}' \
-        > /home/dev/.playwright/cli.config.json \
-    && chmod -R a+rX /opt/claude-plugins \
-    && chown -R dev:dev /home/dev/.agents /home/dev/.playwright
+COPY docker/playwright-cli.sh $SCRIPTS/
+RUN bash $SCRIPTS/playwright-cli.sh
 
-# Install Claude Code as native binary (has built-in audio for voice mode)
+# Agent layers last, so --update (CLAUDE_CACHE_BUST/CODEX_CACHE_BUST) only
+# rebuilds these; see Dockerfile.
 ARG CLAUDE_CACHE_BUST=0
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && cp /root/.local/share/claude/versions/* /usr/local/bin/claude
+COPY docker/claude.sh $SCRIPTS/
+RUN bash $SCRIPTS/claude.sh
 
-# Install opencode alongside Claude Code. It is a standalone native binary,
-# copied to /usr/local/bin so the non-root dev user can run it. The agent is
-# chosen at runtime (SANDBOX_AGENT), not by which image is built, so it is
-# installed in every image.
-RUN curl -fsSL https://opencode.ai/install | bash \
-    && cp /root/.opencode/bin/opencode /usr/local/bin/opencode
+COPY docker/opencode.sh $SCRIPTS/
+RUN bash $SCRIPTS/opencode.sh
 
-# Codex is selected at runtime, just like Claude Code and opencode.
 ARG CODEX_CACHE_BUST=0
 RUN npm install -g @openai/codex
 

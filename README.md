@@ -340,6 +340,7 @@ comes in as a dependency of the NodeSource `nodejs` package.
 ├── Dockerfile                  # Default CPU image: Ubuntu 24.04 + Python + Claude Code + uv
 ├── Dockerfile.cuda             # Optional CUDA image (used with --gpu)
 ├── Dockerfile.rust             # Optional Rust image (used with --rust)
+├── docker/                     # Install scripts shared by the Dockerfiles (one layer each)
 ├── docker-compose.yml          # Base shared configuration (audio, volumes)
 ├── docker-compose.rootless.yml      # Rootless override: host networking
 ├── docker-compose.rootful.yml       # Rootful override: security hardening
@@ -365,7 +366,7 @@ RUN pip install torch torchvision --break-system-packages
 
 ### Disabling voice mode
 
-Remove the PulseAudio-related volumes and environment variables from `docker-compose.yml`, and the `sox`/`alsa`/`pulseaudio` packages from the Dockerfile.
+Remove the PulseAudio-related volumes and environment variables from `docker-compose.yml`, and the `sox`/`alsa`/`pulseaudio` packages from `docker/apt-base.sh`.
 
 ## Development checks
 
