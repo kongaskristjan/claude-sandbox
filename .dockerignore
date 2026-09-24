@@ -1,0 +1,5 @@
+# Allowlist: only what the Dockerfiles COPY.
+*
+!docker/*.sh
+!entrypoint.sh
+!prepare-auth.py
