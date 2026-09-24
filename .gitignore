@@ -1,3 +1,4 @@
 *.raw
 *.wav
 .claude/worktrees/
+__pycache__/
