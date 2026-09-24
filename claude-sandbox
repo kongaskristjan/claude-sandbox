@@ -256,19 +256,16 @@ if [ "$HOST_NETWORK" = true ] && [ "$MODE" = "rootful" ]; then
 fi
 echo "Docker mode: $STATUS"
 
-# --update bumps a stamp that feeds the CLAUDE_CACHE_BUST build arg, which sits
-# right before the Claude install layer in the Dockerfile. Docker keys layer
-# cache on the arg's value, so a one-off value would only help the update run
-# itself: the next plain build would pass the default again and match the old,
-# stale layer. Persist the stamp and pass it on every build so all later runs
-# resolve to the refreshed layer.
+# --update bumps a stamp fed to AGENT_CACHE_BUST, which rebuilds the agent
+# layers. It is passed on every build: with a one-off value the next plain
+# build would match the stale layers again. The file name predates the other
+# agents; keep it so existing stamps carry over.
 STAMP_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-sandbox/claude-update-stamp"
 if [ "$UPDATE" = true ]; then
     mkdir -p "$(dirname "$STAMP_FILE")"
     date +%s > "$STAMP_FILE"
 fi
-CLAUDE_CACHE_BUST="$(cat "$STAMP_FILE" 2>/dev/null || echo 0)"
-BUILD_ARGS=(--build-arg "CLAUDE_CACHE_BUST=$CLAUDE_CACHE_BUST" --build-arg "CODEX_CACHE_BUST=$CLAUDE_CACHE_BUST")
+BUILD_ARGS=(--build-arg "AGENT_CACHE_BUST=$(cat "$STAMP_FILE" 2>/dev/null || echo 0)")
 if [ "$UPDATE" = false ]; then
     BUILD_ARGS+=(--quiet)
 fi

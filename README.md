@@ -276,10 +276,11 @@ Environment variables:
 ```
 
 `--update` writes a timestamp to `~/.cache/claude-sandbox/claude-update-stamp`
-(or under `$XDG_CACHE_HOME`) and passes it to the build as `CLAUDE_CACHE_BUST`
-and `CODEX_CACHE_BUST`. The agent install layers and entrypoint copy are rebuilt;
-apt, node, uv, Rust, and the Playwright browser stay cached. Because the stamp persists and is passed on every run, later runs keep
-using the refreshed layer instead of matching the stale one.
+(or under `$XDG_CACHE_HOME`) and passes it to the build as `AGENT_CACHE_BUST`,
+which rebuilds the Claude Code, opencode and Codex layers and the entrypoint copy;
+apt, node, uv, Rust, and the Playwright browser stay cached. Because the stamp
+persists and is passed on every run, later runs keep using the refreshed layers
+instead of matching the stale ones.
 
 ## Security model
 

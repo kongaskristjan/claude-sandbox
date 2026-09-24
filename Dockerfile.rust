@@ -39,16 +39,15 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
 COPY docker/playwright-cli.sh $SCRIPTS/
 RUN bash $SCRIPTS/playwright-cli.sh
 
-# Agent layers last, so --update (CLAUDE_CACHE_BUST/CODEX_CACHE_BUST) only
-# rebuilds these; see Dockerfile.
-ARG CLAUDE_CACHE_BUST=0
+# Agent layers last, so --update (AGENT_CACHE_BUST) only rebuilds these; see
+# Dockerfile.
+ARG AGENT_CACHE_BUST=0
 COPY docker/claude.sh $SCRIPTS/
 RUN bash $SCRIPTS/claude.sh
 
 COPY docker/opencode.sh $SCRIPTS/
 RUN bash $SCRIPTS/opencode.sh
 
-ARG CODEX_CACHE_BUST=0
 RUN npm install -g @openai/codex
 
 COPY prepare-auth.py /usr/local/lib/claude-sandbox/prepare-auth.py

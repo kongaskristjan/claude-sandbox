@@ -22,12 +22,9 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
 COPY docker/playwright-cli.sh $SCRIPTS/
 RUN bash $SCRIPTS/playwright-cli.sh
 
-# The agent layers sit after every other install so that invalidating them is
-# cheap: `claude-sandbox --update` changes CLAUDE_CACHE_BUST/CODEX_CACHE_BUST,
-# which re-runs these RUNs while apt, node, uv and the Playwright browser stay
-# cached. The value is persisted on the host and passed on every build, so
-# later runs keep hitting the refreshed layers instead of the stale ones.
-ARG CLAUDE_CACHE_BUST=0
+# Agent layers go last: `claude-sandbox --update` changes AGENT_CACHE_BUST,
+# which re-runs every RUN from here on while the layers above stay cached.
+ARG AGENT_CACHE_BUST=0
 COPY docker/claude.sh $SCRIPTS/
 RUN bash $SCRIPTS/claude.sh
 
@@ -35,7 +32,6 @@ RUN bash $SCRIPTS/claude.sh
 COPY docker/opencode.sh $SCRIPTS/
 RUN bash $SCRIPTS/opencode.sh
 
-ARG CODEX_CACHE_BUST=0
 RUN npm install -g @openai/codex
 
 COPY prepare-auth.py /usr/local/lib/claude-sandbox/prepare-auth.py

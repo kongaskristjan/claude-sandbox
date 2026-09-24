@@ -176,6 +176,8 @@ class SandboxTests(unittest.TestCase):
         })
         self.executable("docker", '''#!/usr/bin/env python3
 import json, os, pathlib, sys
+if "build" in sys.argv:
+    pathlib.Path(os.environ["CAPTURE"]).with_suffix(".build.json").write_text(json.dumps(sys.argv[1:]))
 if "run" in sys.argv:
     names = ["CLAUDE_CREDENTIALS_FILE", "CLAUDE_CONFIG_FILE", "OPENCODE_AUTH_FILE",
              "OPENCODE_CONFIG_FILE", "CODEX_AUTH_FILE"]
@@ -301,6 +303,17 @@ if "run" in sys.argv:
         self.launch(success=False)
         data = self.launch("--api-keys")
         self.assertEqual(data["env"]["SANDBOX_ANTHROPIC_API_KEY"], "legacy-secret")
+
+    def test_update_stamp_persists_as_agent_cache_bust(self):
+        build = Path(self.env["CAPTURE"]).with_suffix(".build.json")
+        self.launch()
+        self.assertIn("AGENT_CACHE_BUST=0", json.loads(build.read_text()))
+        self.launch("--update")
+        stamp = (self.base / "cache/claude-sandbox/claude-update-stamp").read_text().strip()
+        self.launch()
+        self.assertIn(f"AGENT_CACHE_BUST={stamp}", json.loads(build.read_text()))
+        for dockerfile in ("Dockerfile", "Dockerfile.cuda", "Dockerfile.rust"):
+            self.assertEqual((ROOT / dockerfile).read_text().count("ARG AGENT_CACHE_BUST=0"), 1)
 
     def test_macos_claude_keychain_login(self):
         self.executable("uname", "#!/bin/bash\necho Darwin\n")
